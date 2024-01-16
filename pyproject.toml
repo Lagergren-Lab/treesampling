@@ -1,0 +1,12 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "treesampling"
+version = "0.0.1"
+authors = [
+    {name = "Vittorio Zampinetti", email = "vittorio.zampinetti@polito.it"},
+]
+description = "Tree sampling algorithms"
+readme = "README.md"
