@@ -1,9 +1,9 @@
 import time
-from operator import mul
-from functools import reduce
 import random
 import networkx as nx
-from utils.graphs import tree_to_newick
+import numpy as np
+import csv
+from utils.graphs import tree_to_newick, graph_weight
 
 from utils.graphs import random_uniform_graph, normalize_graph_weights
 
@@ -45,7 +45,7 @@ def _update_wx(wy_table, u) -> dict:
     wx_table = {}
     for (v, w) in wy_table.keys():
         if v != u and w != u:
-            wx_table[v, w] = wy_table[v, w] - wy_table[v, u] * wy_table[u, w] / wy_table[u,u]
+            wx_table[v, w] = wy_table[v, w] - wy_table[v, u] * wy_table[u, w] / wy_table[u, u]
     return wx_table
 
 
@@ -116,21 +116,11 @@ def jens_rst(in_graph: nx.DiGraph, root=0, trick=True) -> nx.DiGraph:
 def _compute_wx_table(graph: nx.DiGraph, x_set: list) -> dict:
     # print(f"w(G): {nx.to_numpy_array(graph)}")
     # print(f"x_set: {list(graph.nodes())}")
-    # trivial case when X set has only one node
-    if len(x_set) == 1:
-        u = x_set[0]
-        wx = {(u, u): 1}
-        return wx
+    # base step: x_set = [v] (one node)
+    v = x_set[0]
+    wx = {(v, v): 1}
 
-    # base step: x_set = [u, v] (two nodes)
-    u, v = x_set[:2]
-    wx = {
-        (u, v): graph.edges()[u, v]['weight'],
-        (v, u): graph.edges()[v, u]['weight'],
-        (v, v): graph.edges()[v, u]['weight'] * graph.edges()[u, v]['weight'],
-        (u, u): graph.edges()[u, v]['weight'] * graph.edges()[v, u]['weight'],
-    }
-    for i in range(2, len(x_set)):
+    for i in range(1, len(x_set)):
         # print(f"current wx: {wx}")
         x = x_set[:i]
         # print(f"x: {x}")
@@ -172,37 +162,50 @@ def _compute_wx_table(graph: nx.DiGraph, x_set: list) -> dict:
 
 
 if __name__ == '__main__':
-    n_nodes = 5
-    sample_size = 5000
-    log_scale_weights = False  # change
-    graph = random_uniform_graph(n_nodes)
+    results_csv_path = "../output/uniform_graph_corr_time.csv"
+    # write header
+    with open(results_csv_path, 'w') as fd:
+        writer = csv.writer(fd)
+        writer.writerow(['n_nodes', 'sample_size', 'time', 'correlation'])
 
-    # start = time.time()
-    # # networkx
-    # trees = [nx.random_spanning_tree(graph, weight='weight',
-    #                                  multiplicative=not log_scale_weights) for _ in range(sample_size)]
-    # end = time.time() - start
-    # print(f"K = {n_nodes}: sampled {sample_size} trees in {end}s")
-    # for tree in trees:
-    #     print(f"\t{[e for e in tree.edges()]}")
-    #
+    # repeat for different number of nodes
+    for n_nodes in [5, 8, 10, 15, 20, 25]:
+        trees_sample = {}
+        graph = random_uniform_graph(n_nodes)
+        times = []
+        sample_sizes = [100, 500, 1000, 2000, 5000, 10000]
+        results = []
+        for i in range(len(sample_sizes)):
+            prev_time = 0 if i == 0 else times[-1]
+            prev_ss = 0 if i == 0 else sample_sizes[i-1]
+            sample_size = sample_sizes[i]
+            log_scale_weights = False  # change
 
-    # try jens_rst
-    start = time.time()
-    trees_sample = {}
-    for i in range(sample_size):
-        tree = jens_rst(graph)
-        tree_newick = tree_to_newick(tree)
-        if tree_newick not in trees_sample:
-            trees_sample[tree_newick] = (1, tree)
-        else:
-            trees_sample[tree_newick] = (trees_sample[tree_newick][0] + 1, tree)
-    end = time.time() - start
+            start = time.time()
+            for i in range(sample_size - prev_ss):
+                tree = jens_rst(graph)
+                tree_newick = tree_to_newick(tree)
+                if tree_newick not in trees_sample:
+                    trees_sample[tree_newick] = (1, tree)
+                else:
+                    trees_sample[tree_newick] = (trees_sample[tree_newick][0] + 1, tree)
+            end = time.time() - start
+            times.append(end + prev_time)
 
-    # TODO: print also sum weights normalized, and compute hoeffding's bound probability
-    for t_nwk, (prop, t) in trees_sample.items():
-        print(f"\t{prop / sample_size} : {reduce(mul, list(t.edges()[e]['weight'] for e in t.edges()), 1)}"
-              f" newick: {t_nwk}")
-    # print time
-    print(f"K = {n_nodes}: sampled {sample_size} trees in {end}s")
-    # TODO: save big results, print correlation and assess correctness (some proportions don't agree)
+            tree_freqs = []  # frequency of tree in a sample
+            tree_weights = []  # weight of tree in the sample
+            for t_nwk, (prop, t) in trees_sample.items():
+                tree_freqs.append(prop / sample_size)
+                tree_weights.append(graph_weight(t, log_probs=log_scale_weights))
+                # print(f"\t{tree_freqs[-1]} : {tree_weights[-1]}"
+                #       f" newick: {t_nwk}")
+            correlation = np.corrcoef(tree_freqs, tree_weights)[0, 1]
+            # print(f"Correlation coeff: {correlation}")
+            # # print time
+            # print(f"K = {n_nodes}: sampled {sample_size} trees in {times[-1]}s")
+            results.append([n_nodes, sample_size, times[-1], correlation])
+            print(f"{results[-1]}")
+        with open(results_csv_path, 'a') as fd:
+            writer = csv.writer(fd)
+            for r in results:
+                writer.writerow(r)

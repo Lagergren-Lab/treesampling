@@ -1,5 +1,7 @@
 import random
 import itertools
+from operator import mul
+from functools import reduce
 import numpy as np
 import networkx as nx
 
@@ -54,3 +56,19 @@ def reset_adj_matrix(graph: nx.DiGraph, matrix: np.ndarray) -> nx.DiGraph:
     new_graph = graph.copy()
     new_graph.add_weighted_edges_from(weights_dict)
     return new_graph
+
+
+def graph_weight(graph: nx.DiGraph, log_probs=False):
+    if log_probs:
+        # sum of weights
+        w = graph.size(weight='weight')
+    else:
+        # product of weights
+        w = reduce(mul, list(graph.edges()[e]['weight'] for e in graph.edges()), 1)
+
+    return w
+
+
+def cayleys_formula(n):
+    assert n > 1
+    return n**(n-2)
