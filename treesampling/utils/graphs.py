@@ -40,6 +40,26 @@ def random_uniform_graph(n_nodes, log_probs=False) -> nx.DiGraph:
     return graph
 
 
+def random_k_trees_graph(n_nodes, k) -> nx.DiGraph:
+    # generate an adjacency matrix by sampling k random spanning trees
+    # and adding weight to the full graph iteratively
+    # The result is an adjacency matrix which has most probability mass on few trees,
+    #   similar one another
+    adj_matrix = np.ones((n_nodes, n_nodes))
+
+    graph = nx.complete_graph(n_nodes, create_using=nx.DiGraph)
+    for i in range(k):
+        if i == 0:
+            tree = nx.random_tree(n_nodes, create_using=nx.DiGraph)
+            # print(tree_to_newick(tree))
+        # else:
+        #     tree = nx.random_spanning_tree(graph, weight='weight', multiplicative=True)
+        for e in tree.edges():
+            adj_matrix[e] += 1
+        graph = reset_adj_matrix(graph, adj_matrix)
+    return graph
+
+
 def normalize_graph_weights(graph, log_probs=False, rowwise=True) -> nx.DiGraph:
     adj_mat = nx.to_numpy_array(graph)
     axis = 1 if rowwise else 0
@@ -67,6 +87,38 @@ def graph_weight(graph: nx.DiGraph, log_probs=False):
         w = reduce(mul, list(graph.edges()[e]['weight'] for e in graph.edges()), 1)
 
     return w
+
+
+def mat_minor(mat, row, col):
+    """
+    Minor of a matrix, removing row and col.
+    :param mat: 2D numpy array
+    :param row: row index to be removed
+    :param col: col index to be removed
+    :return:
+    """
+    M, N = mat.shape
+    ridx = np.hstack([np.arange(0, row), np.arange(row + 1, M)])
+    cidx = np.hstack([np.arange(0, col), np.arange(col + 1, N)])
+    return mat[ridx[:, np.newaxis], cidx]
+
+
+def tuttes_tot_weight(graph: nx.DiGraph, root, weight='weight'):
+    """
+    Ref: https://arxiv.org/pdf/1904.12221.pdf
+    :param graph: directed graph with weights
+    :param root: root node of every spanning tree
+    :return: the total weight sum of all spanning arborescence
+     weights (that is the product of the tree arc weights)
+    """
+
+    A = nx.to_numpy_array(graph, weight=weight)
+    np.fill_diagonal(A, 0)
+    Din = np.diag(np.sum(A, axis=0))
+    L1 = Din - A
+    L1r = mat_minor(L1, row=root, col=root)
+
+    return np.linalg.det(L1r)
 
 
 def cayleys_formula(n):

@@ -5,9 +5,9 @@ import numpy as np
 import csv
 
 from treesampling.utils.math import logsubexp, gumbel_max_trick_sample
-from utils.graphs import tree_to_newick, graph_weight
+from treesampling.utils.graphs import tree_to_newick, graph_weight
 
-from utils.graphs import random_uniform_graph, normalize_graph_weights
+from treesampling.utils.graphs import random_uniform_graph, normalize_graph_weights
 
 
 def wilson_rst(graph) -> nx.DiGraph:
@@ -51,13 +51,17 @@ def _update_wx(wy_table, u) -> dict:
     return wx_table
 
 
-def jens_rst(in_graph: nx.DiGraph, root=0, trick=True) -> nx.DiGraph:
+def jens_rst(in_graph: nx.DiGraph, root=None, trick=True) -> nx.DiGraph:
     # normalize out arcs (rows)
     # print("BEGIN ALGORITHM")
     graph = normalize_graph_weights(in_graph, log_probs=True)
 
     # algorithm variables
     tree = nx.DiGraph()
+    if root is None:
+        # FIXME check criterion for root choice
+        # randomly choose a root
+        root = random.choice(range(graph.number_of_nodes()))
     tree.add_node(root)
     dangling_path: list[tuple] = []  # store dangling path branch (not yet attached to tree, not in X)
     x_list = list(set(graph.nodes()).difference([root]))  # X set
