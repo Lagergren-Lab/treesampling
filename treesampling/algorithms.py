@@ -52,6 +52,13 @@ def _update_wx(wy_table, u) -> dict:
 
 
 def jens_rst(in_graph: nx.DiGraph, root=None, trick=True) -> nx.DiGraph:
+    """
+    Sample one tree from a given graph with fast arborescence sampling algorithm.
+    :param in_graph: must have log-scale weights
+    :param root: root node
+    :param trick: if false, Wx gets re-computed every time
+    :return: nx.DiGraph with tree edges only
+    """
     # normalize out arcs (rows)
     # print("BEGIN ALGORITHM")
     graph = normalize_graph_weights(in_graph, log_probs=True)
