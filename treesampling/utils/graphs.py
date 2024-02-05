@@ -40,24 +40,18 @@ def random_uniform_graph(n_nodes, log_probs=False) -> nx.DiGraph:
     return graph
 
 
-def random_k_trees_graph(n_nodes, k) -> nx.DiGraph:
-    # generate an adjacency matrix by sampling k random spanning trees
-    # and adding weight to the full graph iteratively
-    # The result is an adjacency matrix which has most probability mass on few trees,
-    #   similar one another
+def random_tree_skewed_graph(n_nodes, skewness) -> tuple[nx.DiGraph, nx.DiGraph]:
+    # generate an adjacency matrix by sampling 1 random spanning tree
+    # and adding k to the weight of each arc on that tree
+    # The result is an adjacency matrix which has most probability mass on one tree,
     adj_matrix = np.ones((n_nodes, n_nodes))
 
     graph = nx.complete_graph(n_nodes, create_using=nx.DiGraph)
-    for i in range(k):
-        if i == 0:
-            tree = nx.random_tree(n_nodes, create_using=nx.DiGraph)
-            # print(tree_to_newick(tree))
-        # else:
-        #     tree = nx.random_spanning_tree(graph, weight='weight', multiplicative=True)
-        for e in tree.edges():
-            adj_matrix[e] += 1
-        graph = reset_adj_matrix(graph, adj_matrix)
-    return graph
+    tree = nx.random_tree(n_nodes, create_using=nx.DiGraph)
+    for e in tree.edges():
+        adj_matrix[e] += skewness
+    graph = reset_adj_matrix(graph, adj_matrix)
+    return graph, tree
 
 
 def normalize_graph_weights(graph, log_probs=False, rowwise=True) -> nx.DiGraph:

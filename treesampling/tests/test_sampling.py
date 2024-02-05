@@ -13,7 +13,7 @@ def test_log_random_uniform_graph():
 
 def test_random_k_trees_graph():
     root = 0
-    graph = random_k_trees_graph(5, 100)
+    graph = random_tree_skewed_graph(5, 100)
     norm_graph = normalize_graph_weights(graph)
 
     # Kirchhoff theorem for directed graphs, to get total weight of all trees
