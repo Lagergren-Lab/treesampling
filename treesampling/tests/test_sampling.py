@@ -84,5 +84,27 @@ def test_laplacian():
     # assert np.isclose(tot_weight0, laplacian_tot_weight)
 
 
+def test_uniform_graph_sampling():
+    n_nodes = 5
+    adj_mat = np.ones((n_nodes, n_nodes))
+    graph = nx.from_numpy_array(adj_mat)
+    norm_graph = normalize_graph_weights(graph)
+
+    sample_size = 5000
+    sample_dict = {}
+    for s in range(sample_size):
+        tree = algorithms.jens_rst(norm_graph, root=0)
+        tree_nwk = tree_to_newick(tree)
+        if tree_nwk not in sample_dict:
+            sample_dict[tree_nwk] = 0
+        sample_dict[tree_nwk] = sample_dict[tree_nwk] + 1
+    print("\n")
+    for k, v in sorted(sample_dict.items(), key=lambda p: p[1], reverse=True):
+        print(k, v)
+    print(len(sample_dict))
+
+
+
+
 
 

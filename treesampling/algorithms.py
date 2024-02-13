@@ -77,7 +77,7 @@ def jens_rst(in_graph: nx.DiGraph, root=None, trick=True) -> nx.DiGraph:
     wx_table = _compute_wx_table(graph, x_list)
     # iterate for each node
     while len(x_list) > 1:
-        # print(f"+ TREE NODES: {tree.nodes()}")
+        # print(f"+ TREE: {tree_to_newick(tree)}")
         # print(f"\tX set: {x_list}")
         # print(f"\tdangling path: {dangling_path}")
         # choose new i if no dangling nodes
