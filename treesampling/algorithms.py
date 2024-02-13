@@ -2,6 +2,7 @@ import time
 import random
 import networkx as nx
 import numpy as np
+import scipy.special as ss
 import csv
 
 from treesampling.utils.math import logsubexp, gumbel_max_trick_sample
@@ -17,6 +18,7 @@ def wilson_rst(graph) -> nx.DiGraph:
     return random_tree
 
 
+# IMPLEMENTATION IN NORMAL SCALE
 def _compute_lexit_table(i, x_list: list,  wx_table: dict, tree: nx.DiGraph, graph: nx.DiGraph) -> tuple[list, list]:
     nodes = []  # tuples (node, source) - source can be 'x' or 't'
     w_choice = []  # weights for random choice at each node
@@ -24,20 +26,20 @@ def _compute_lexit_table(i, x_list: list,  wx_table: dict, tree: nx.DiGraph, gra
     # probability of any u in V(T) U X to be the next connection to i
     pattach = {}  # for each v in X, gives sum_{w in T} p(w, v)
     for v in x_list:
-        p_treetou = - np.infty
+        p_treetou = 0
         for w in tree.nodes():
-            p_treetou = np.logaddexp(p_treetou, graph.edges()[w, v]['weight'])
+            p_treetou = p_treetou + graph.edges()[w, v]['weight']
         pattach[v] = p_treetou
 
     for u in tree.nodes():
         nodes.append((u, 't'))
         w_choice.append(graph.edges()[u, i]['weight'])
     for u in x_list:
-        p_treetou = - np.infty
+        p_treetou = 0
         for v in x_list:
-            p_treetou = np.logaddexp(p_treetou, pattach[v] + wx_table[v, u])
+            p_treetou = p_treetou + pattach[v] * wx_table[v, u]
         nodes.append((u, 'x'))
-        w_choice.append(p_treetou + graph.edges()[u, i]['weight'])
+        w_choice.append(p_treetou * graph.edges()[u, i]['weight'])
 
     return nodes, w_choice  # (u, origin) list and choice weights list
 
@@ -47,11 +49,11 @@ def _update_wx(wy_table, u) -> dict:
     wx_table = {}
     for (v, w) in wy_table.keys():
         if v != u and w != u:
-            wx_table[v, w] = logsubexp(wy_table[v, w], wy_table[v, u] + wy_table[u, w] - wy_table[u, u])
+            wx_table[v, w] = wy_table[v, w] - wy_table[v, u] * wy_table[u, w] / wy_table[u, u]
     return wx_table
 
 
-def jens_rst(in_graph: nx.DiGraph, root=None, trick=True) -> nx.DiGraph:
+def jens_rst(in_graph: nx.DiGraph, root, trick=True) -> nx.DiGraph:
     """
     Sample one tree from a given graph with fast arborescence sampling algorithm.
     :param in_graph: must have log-scale weights
@@ -61,14 +63,10 @@ def jens_rst(in_graph: nx.DiGraph, root=None, trick=True) -> nx.DiGraph:
     """
     # normalize out arcs (rows)
     # print("BEGIN ALGORITHM")
-    graph = normalize_graph_weights(in_graph, log_probs=True)
+    graph = normalize_graph_weights(in_graph, log_probs=False)
 
     # algorithm variables
     tree = nx.DiGraph()
-    if root is None:
-        # FIXME check criterion for root choice
-        # randomly choose a root
-        root = random.choice(range(graph.number_of_nodes()))
     tree.add_node(root)
     dangling_path: list[tuple] = []  # store dangling path branch (not yet attached to tree, not in X)
     x_list = list(set(graph.nodes()).difference([root]))  # X set
@@ -98,7 +96,170 @@ def jens_rst(in_graph: nx.DiGraph, root=None, trick=True) -> nx.DiGraph:
         nodes_lab, w_choice = _compute_lexit_table(i_vertex, x_list, wx_table, tree, graph)
 
         # pick next node
+        rnd_idx = random.choices(list(range(len(w_choice))), w_choice, k=1)
+        u_vertex, origin_lab = nodes_lab[rnd_idx[0]]
+        dangling_path.append((u_vertex, i_vertex, graph.edges()[u_vertex, i_vertex]['weight']))
+        if origin_lab == 't':
+            # if u picked from tree, attach dangling path and reset
+            # print(f"\t TREE ATTACHMENT! selected u {u_vertex} from tree -> i {i_vertex}")
+            # print(f"\t attached path: {dangling_path}")
+            # add dangling path edges to tree
+            tree.add_weighted_edges_from(dangling_path)
+            dangling_path = []
+
+    assert len(x_list) == 1
+    i_vertex = x_list[0]
+    tree_nodes = list(tree.nodes())
+    rnd_idx = random.choices(list(range(len(tree_nodes))), [graph.edges()[u, i_vertex]['weight'] for u in tree_nodes],
+                             k=1)
+    u_vertex = tree_nodes[rnd_idx[0]]
+
+    if dangling_path:
+        dangling_path.append((u_vertex, i_vertex, graph.edges()[u_vertex, i_vertex]['weight']))
+
+        # print(f"\t LAST TREE ATTACHMENT! selected u {u_vertex} from tree -> i {i_vertex}")
+        # print(f"\t attached path: {dangling_path}")
+        tree.add_weighted_edges_from(dangling_path)
+    else:
+        # print(f"\t LAST TREE ATTACHMENT! selected u {u_vertex} from tree -> i {i_vertex}")
+        tree.add_edge(u_vertex, i_vertex, weight=graph.edges()[u_vertex, i_vertex]['weight'])
+
+    return tree
+
+
+def _compute_wx_table(graph: nx.DiGraph, x_set: list) -> dict:
+    # print(f"w(G): {nx.to_numpy_array(graph)}")
+    # print(f"x_set: {list(graph.nodes())}")
+    # base step: x_set = [v] (one node)
+    v = x_set[0]
+    wx = {(v, v): 1}
+
+    for i in range(1, len(x_set)):
+        # print(f"current wx: {wx}")
+        x = x_set[:i]
+        # print(f"x: {x}")
+        u = x_set[i]
+        # print(f"new vertex u: {u}")
+        # Y = X U { Vi }
+        wy = {}
+        # compute Ry(u) where u is Y \ X (u)
+        ry_1 = 0
+        for (v, w) in wx.keys():
+            ry_1 = ry_1 + graph.edges()[u, v]['weight'] * wx[v, w] * graph.edges()[w, u]['weight']
+        ry = 1 / (1 - ry_1)
+
+        # compute Wy
+        # partial computations: Wxy and Wyx
+        wxy = {}  # Wxy (all paths from any v to new vertex u = Y \ X)
+        wyx = {}  # Wxy (all paths from the new vertex u to any v in X)
+        for v in x:
+            wxy[v] = 0
+            wyx[v] = 0
+            for vv in x:
+                wxy[v] = wxy[v] + graph.edges()[vv, u]['weight'] * wx[v, vv]
+                wyx[v] = wyx[v] + wx[vv, v] * graph.edges()[u, vv]['weight']
+
+        # write new W table
+        for v in x:
+            # special case: start or end in new vertex u
+            wy[u, v] = ry * wyx[v]
+            wy[v, u] = wxy[v] * ry
+            for w in x:
+                # main update: either stay in X or pass through u (Y \ X)
+                wy[v, w] = wx[v, w] + wxy[v] * ry * wyx[w]
+        # new self returning random path
+        wy[u, u] = ry
+
+        wx = wy
+
+    return wx
+
+# IMPLEMENTATION IN LOG SCALE
+def _compute_lexit_table_log(i, x_list: list,  wx_table: dict, tree: nx.DiGraph, graph: nx.DiGraph) -> tuple[list, list]:
+    nodes = []  # tuples (node, source) - source can be 'x' or 't'
+    w_choice = []  # weights for random choice at each node
+
+    # probability of any u in V(T) U X to be the next connection to i
+    pattach = {}  # for each v in X, gives sum_{w in T} p(w, v)
+    for v in x_list:
+        p_treetou = - np.infty
+        for w in tree.nodes():
+            p_treetou = np.logaddexp(p_treetou, graph.edges()[w, v]['weight'])
+        pattach[v] = p_treetou
+
+    for u in tree.nodes():
+        nodes.append((u, 't'))
+        w_choice.append(graph.edges()[u, i]['weight'])
+    for u in x_list:
+        p_treetou = - np.infty
+        for v in x_list:
+            p_treetou = np.logaddexp(p_treetou, pattach[v] + wx_table[v, u])
+        nodes.append((u, 'x'))
+        w_choice.append(p_treetou + graph.edges()[u, i]['weight'])
+
+    return nodes, w_choice  # (u, origin) list and choice weights list
+
+
+def _update_wx_log(wy_table, u) -> dict:
+    # speed up trick
+    wx_table = {}
+    for (v, w) in wy_table.keys():
+        if v != u and w != u:
+            wx_table[v, w] = logsubexp(wy_table[v, w], wy_table[v, u] + wy_table[u, w] - wy_table[u, u])
+    return wx_table
+
+
+def jens_rst_log(in_graph: nx.DiGraph, root, trick=True) -> nx.DiGraph:
+    """
+    Sample one tree from a given graph with fast arborescence sampling algorithm.
+    :param in_graph: must have log-scale weights
+    :param root: root node
+    :param trick: if false, Wx gets re-computed every time
+    :return: nx.DiGraph with tree edges only
+    """
+    # normalize out arcs (rows)
+    # print("BEGIN ALGORITHM")
+    graph = normalize_graph_weights(in_graph, log_probs=True)
+
+    # algorithm variables
+    tree = nx.DiGraph()
+    tree.add_node(root)
+    dangling_path: list[tuple] = []  # store dangling path branch (not yet attached to tree, not in X)
+    x_list = list(set(graph.nodes()).difference([root]))  # X set
+    # precompute Wx table
+    # build wx with X = V \ {root}
+    wx_table = _compute_wx_table_log(graph, x_list)
+    # iterate for each node
+    while len(x_list) > 1:
+        # print(f"+ TREE: {tree_to_newick(tree)}")
+        # print(f"\tX set: {x_list}")
+        # print(f"\tdangling path: {dangling_path}")
+        # choose new i if no dangling nodes
+        if not dangling_path:
+            i_vertex = random.choice(x_list)
+            x_list.remove(i_vertex)
+        # or set last node
+        else:
+            last_edge = dangling_path[-1]
+            i_vertex = last_edge[0]
+            x_list.remove(i_vertex)
+
+        # update Wx table
+        if trick:
+            wx_table = _update_wx_log(wx_table, i_vertex)
+        else:
+            wx_table = _compute_wx_table_log(graph, x_list)
+        nodes_lab, w_choice = _compute_lexit_table_log(i_vertex, x_list, wx_table, tree, graph)
+
+        # pick next node
+        # --- original
         rnd_idx = gumbel_max_trick_sample(w_choice)
+
+        # --- exponentiate version
+        # w_choice_p = ss.softmax(np.array(w_choice))
+        # rnd_idx = random.choices(list(range(len(w_choice))), w_choice_p, k=1)
+        # rnd_idx = rnd_idx[0]
+        # ---
         u_vertex, origin_lab = nodes_lab[rnd_idx]
         dangling_path.append((u_vertex, i_vertex, graph.edges()[u_vertex, i_vertex]['weight']))
         if origin_lab == 't':
@@ -128,7 +289,7 @@ def jens_rst(in_graph: nx.DiGraph, root=None, trick=True) -> nx.DiGraph:
     return tree
 
 
-def _compute_wx_table(graph: nx.DiGraph, x_set: list) -> dict:
+def _compute_wx_table_log(graph: nx.DiGraph, x_set: list) -> dict:
     # print(f"w(G): {nx.to_numpy_array(graph)}")
     # print(f"x_set: {list(graph.nodes())}")
     # base step: x_set = [v] (one node)
@@ -160,16 +321,16 @@ def _compute_wx_table(graph: nx.DiGraph, x_set: list) -> dict:
                 wxy[v] = np.logaddexp(wxy[v], graph.edges()[vv, u]['weight'] + wx[v, vv])
                 wyx[v] = np.logaddexp(wyx[v], wx[vv, v] + graph.edges()[u, vv]['weight'])
 
-        for v, w in wx.keys():
-            # main update: either stay in X or pass through u (Y \ X)
-            wy[v, w] = np.logaddexp(wx[v, w], wxy[v] + ry + wyx[w])
-
+        # write new W table
+        for v in x:
             # special case: start or end in new vertex u
-            wy[u, w] = ry + wyx[w]
+            wy[u, v] = ry + wyx[v]
             wy[v, u] = wxy[v] + ry
-
-            # new self returning random path
-            wy[u, u] = ry
+            for w in x:
+                # main update: either stay in X or pass through u (Y \ X)
+                wy[v, w] = np.logaddexp(wx[v, w], wxy[v] + ry + wyx[w])
+        # new self returning random path
+        wy[u, u] = ry
 
         wx = wy
 
@@ -198,7 +359,7 @@ if __name__ == '__main__':
 
             start = time.time()
             for i in range(sample_size - prev_ss):
-                tree = jens_rst(graph)
+                tree = jens_rst_log(graph, None)
                 tree_newick = tree_to_newick(tree)
                 if tree_newick not in trees_sample:
                     trees_sample[tree_newick] = (1, tree)

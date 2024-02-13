@@ -30,7 +30,7 @@ def test_random_k_trees_graph():
     acc = 0
     num = 0
     for i in range(sample_size):
-        tree = algorithms.jens_rst(log_graph, root=root)
+        tree = algorithms.jens_rst_log(log_graph, root=root)
         tree_nwk = tree_to_newick(tree)
         if tree_nwk not in sample:
             weight = np.exp(graph_weight(tree, log_probs=True))
@@ -85,15 +85,15 @@ def test_laplacian():
 
 
 def test_uniform_graph_sampling():
-    n_nodes = 5
+    n_nodes = 7
     adj_mat = np.ones((n_nodes, n_nodes))
+    np.fill_diagonal(adj_mat, 0)
     graph = nx.from_numpy_array(adj_mat)
-    norm_graph = normalize_graph_weights(graph)
 
-    sample_size = 5000
+    sample_size = 100000
     sample_dict = {}
     for s in range(sample_size):
-        tree = algorithms.jens_rst(norm_graph, root=0)
+        tree = algorithms.jens_rst(graph, root=0)
         tree_nwk = tree_to_newick(tree)
         if tree_nwk not in sample_dict:
             sample_dict[tree_nwk] = 0
