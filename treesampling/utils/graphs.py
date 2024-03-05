@@ -54,7 +54,7 @@ def random_tree_skewed_graph(n_nodes, skewness) -> tuple[nx.DiGraph, nx.DiGraph]
     return graph, tree
 
 
-def normalize_graph_weights(graph, log_probs=False, rowwise=True) -> nx.DiGraph:
+def normalize_graph_weights(graph, log_probs=False, rowwise=False) -> nx.DiGraph:
     adj_mat = nx.to_numpy_array(graph)
     axis = 1 if rowwise else 0
     if not log_probs:

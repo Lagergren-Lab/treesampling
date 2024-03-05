@@ -63,7 +63,7 @@ def jens_rst(in_graph: nx.DiGraph, root, trick=True) -> nx.DiGraph:
     """
     # normalize out arcs (rows)
     # print("BEGIN ALGORITHM")
-    graph = normalize_graph_weights(in_graph, log_probs=False)
+    graph = normalize_graph_weights(in_graph, rowwise=False, log_probs=False)
 
     # algorithm variables
     tree = nx.DiGraph()
@@ -219,7 +219,7 @@ def jens_rst_log(in_graph: nx.DiGraph, root, trick=True) -> nx.DiGraph:
     """
     # normalize out arcs (rows)
     # print("BEGIN ALGORITHM")
-    graph = normalize_graph_weights(in_graph, log_probs=True)
+    graph = normalize_graph_weights(in_graph, rowwise=False, log_probs=True)
 
     # algorithm variables
     tree = nx.DiGraph()
