@@ -61,7 +61,7 @@ def jens_rst(in_graph: nx.DiGraph, root, trick=True) -> nx.DiGraph:
     :param trick: if false, Wx gets re-computed every time
     :return: nx.DiGraph with tree edges only
     """
-    # normalize out arcs (rows)
+    # normalize out arcs (cols)
     # print("BEGIN ALGORITHM")
     graph = normalize_graph_weights(in_graph, rowwise=False, log_probs=False)
 
@@ -217,8 +217,11 @@ def jens_rst_log(in_graph: nx.DiGraph, root, trick=True) -> nx.DiGraph:
     :param trick: if false, Wx gets re-computed every time
     :return: nx.DiGraph with tree edges only
     """
-    # normalize out arcs (rows)
+    # normalize out arcs (cols)
     # print("BEGIN ALGORITHM")
+    # set non-existing edge weights to -inf
+    missing_edges = nx.difference(nx.complete_graph(in_graph.number_of_nodes()), in_graph)
+    in_graph.add_edges_from([(u, v, {'weight': -np.inf}) for u, v in missing_edges.edges()])
     graph = normalize_graph_weights(in_graph, rowwise=False, log_probs=True)
 
     # algorithm variables

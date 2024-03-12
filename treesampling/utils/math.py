@@ -1,10 +1,15 @@
-import math
 import numpy as np
 
 
 def logsubexp(l1, l2):
-    assert l1 >= l2, f"l1: {l1}, l2: {l2}"
-    return l1 + math.log(1 - math.exp(-l1 + l2))
+    dx = -l1 + l2
+    if np.isclose(dx, 0):
+        exp_x = 1
+    else:
+        assert l1 >= l2, f"l1: {l1}, l2: {l2}"
+        exp_x = np.exp(dx)
+
+    return l1 + np.log(1 - exp_x)
 
 
 def gumbel_max_trick_sample(log_probs):
