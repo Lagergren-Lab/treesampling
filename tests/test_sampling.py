@@ -35,7 +35,7 @@ def test_random_k_trees_graph():
     acc = 0
     num = 0
     for i in range(sample_size):
-        tree = algorithms.jens_rst_log(log_graph, root=root)
+        tree = algorithms.random_spanning_tree_log(log_graph, root=root)
         tree_nwk = tg.tree_to_newick(tree)
         if tree_nwk not in sample:
             weight = np.exp(tg.graph_weight(tree, log_probs=True))
@@ -47,7 +47,7 @@ def test_random_k_trees_graph():
     residual = 1 - acc / tot_weight
     unseen_freq = 0
     for i in range(extra_sample):
-        tree = algorithms.jens_rst_log(log_graph, root=root)
+        tree = algorithms.random_spanning_tree_log(log_graph, root=root)
         if tg.tree_to_newick(tree) not in sample:
             unseen_freq += 1
 
@@ -110,7 +110,7 @@ def test_uniform_graph_sampling():
     sample_size = 3 * tot_trees
     sample_dict = {}
     for s in range(sample_size):
-        tree = algorithms.jens_rst(graph, root=0)
+        tree = algorithms.random_spanning_tree(graph, root=0)
         tree_nwk = tg.tree_to_newick(tree)
         if tree_nwk not in sample_dict:
             sample_dict[tree_nwk] = 0

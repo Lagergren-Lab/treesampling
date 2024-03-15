@@ -52,7 +52,7 @@ def _update_wx(wy_table, u) -> dict:
     return wx_table
 
 
-def jens_rst(in_graph: nx.DiGraph, root, trick=True) -> nx.DiGraph:
+def random_spanning_tree(in_graph: nx.DiGraph, root, trick=True) -> nx.DiGraph:
     """
     Sample one tree from a given graph with fast arborescence sampling algorithm.
     :param in_graph: must have log-scale weights
@@ -208,7 +208,7 @@ def _update_wx_log(wy_table, u) -> dict:
     return wx_table
 
 
-def jens_rst_log(in_graph: nx.DiGraph, root, trick=True) -> nx.DiGraph:
+def random_spanning_tree_log(in_graph: nx.DiGraph, root, trick=True) -> nx.DiGraph:
     """
     Sample one tree from a given graph with fast arborescence sampling algorithm.
     :param in_graph: must have log-scale weights
@@ -361,7 +361,7 @@ if __name__ == '__main__':
 
             start = time.time()
             for i in range(sample_size - prev_ss):
-                tree = jens_rst_log(graph, None)
+                tree = random_spanning_tree_log(graph, None)
                 tree_newick = tree_to_newick(tree)
                 if tree_newick not in trees_sample:
                     trees_sample[tree_newick] = (1, tree)
