@@ -29,6 +29,28 @@ def tree_to_newick(g: nx.DiGraph, root=None, weight=None):
     return "(" + ','.join(subgs) + ")" + str(root)
 
 
+# taken from VICTree
+def enumerate_rooted_trees(n_nodes, root=0, weighted_graph: nx.DiGraph | None = None) -> [nx.DiGraph]:
+    """
+    Generate all Prufer sequences to enumerate rooted trees
+    :param n_nodes: number of nodes
+    :param root: root label
+    :param weighted_graph: graph (optional)
+    :return: list of nx.DiGraphs with unique rooted trees
+    """
+    trees = []
+    for pruf_seq in itertools.product(range(n_nodes), repeat=n_nodes - 2):
+        unrooted_tree = nx.from_prufer_sequence(list(pruf_seq))
+        # hang tree from root to generate associated arborescence
+        rooted_tree = nx.dfs_tree(unrooted_tree, root)
+        # if weighted graph is provided, return trees with weights
+        if weighted_graph is not None:
+            for e in rooted_tree.edges():
+                rooted_tree.edges()[e]['weight'] = weighted_graph.edges()[e]['weight']
+        trees.append(rooted_tree)
+    return trees
+
+
 def random_uniform_graph(n_nodes, log_probs=False) -> nx.DiGraph:
     graph = nx.complete_graph(n_nodes, create_using=nx.DiGraph)
     for u, v in graph.edges():
@@ -40,12 +62,21 @@ def random_uniform_graph(n_nodes, log_probs=False) -> nx.DiGraph:
     return graph
 
 
-def random_tree_skewed_graph(n_nodes, skewness) -> tuple[nx.DiGraph, nx.DiGraph]:
-    # generate an adjacency matrix by sampling 1 random spanning tree
-    # and adding k to the weight of each arc on that tree
-    # The result is an adjacency matrix which has most probability mass on one tree,
+def random_tree_skewed_graph(n_nodes, skewness, root: int | None = None) -> tuple[nx.DiGraph, nx.DiGraph]:
+    """
+    Generate an adjacency matrix by sampling 1 random spanning tree
+    and adding k to the weight of each arc on that tree (uses nx random spanning tree function)
+    The result is an adjacency matrix which has most probability mass on one tree.
+    :param n_nodes: number of nodes
+    :param skewness: unbalance of edge weights
+    :return: tuple of resulting weighted graph and tree towards whom the graph is skewed
+    """
     adj_matrix = np.ones((n_nodes, n_nodes))
-
+    # remove self connections
+    np.fill_diagonal(adj_matrix, 0)
+    # if rooted, remove all arcs going in root
+    if root is not None:
+        adj_matrix[:, root] = 0
     graph = nx.complete_graph(n_nodes, create_using=nx.DiGraph)
     tree = nx.random_tree(n_nodes, create_using=nx.DiGraph)
     for e in tree.edges():

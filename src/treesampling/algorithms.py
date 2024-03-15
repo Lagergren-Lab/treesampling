@@ -2,7 +2,6 @@ import time
 import random
 import networkx as nx
 import numpy as np
-import scipy.special as ss
 import csv
 
 from treesampling.utils.math import logsubexp, gumbel_max_trick_sample
@@ -342,7 +341,7 @@ def _compute_wx_table_log(graph: nx.DiGraph, x_set: list) -> dict:
 
 if __name__ == '__main__':
     log_scale_weights = True  # change
-    results_csv_path = "../output/uniform_log_graph_corr_time.csv"
+    results_csv_path = "../../output/uniform_log_graph_corr_time.csv"
     # write header
     with open(results_csv_path, 'w') as fd:
         writer = csv.writer(fd)
