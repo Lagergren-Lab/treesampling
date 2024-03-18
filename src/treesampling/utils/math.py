@@ -9,7 +9,8 @@ def logsubexp(l1, l2):
         assert l1 >= l2, f"l1: {l1}, l2: {l2}"
         exp_x = np.exp(dx)
 
-    return l1 + np.log(1 - exp_x)
+    res = l1 + np.log(1 - exp_x)
+    return res
 
 
 def gumbel_max_trick_sample(log_probs):

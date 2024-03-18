@@ -204,6 +204,7 @@ def _update_wx_log(wy_table, u) -> dict:
     wx_table = {}
     for (v, w) in wy_table.keys():
         if v != u and w != u:
+            # FIXME: solve for when inf - inf
             wx_table[v, w] = logsubexp(wy_table[v, w], wy_table[v, u] + wy_table[u, w] - wy_table[u, u])
     return wx_table
 
@@ -310,7 +311,8 @@ def _compute_wx_table_log(graph: nx.DiGraph, x_set: list) -> dict:
         ry_1 = - np.infty
         for (v, w) in wx.keys():
             ry_1 = np.logaddexp(ry_1, graph.edges()[u, v]['weight'] + wx[v, w] + graph.edges()[w, u]['weight'])
-        ry = - logsubexp(0, ry_1)
+        # stable exponentiation
+        ry = - np.log(1 - np.exp(ry_1))
 
         # compute Wy
         # partial computations: Wxy and Wyx

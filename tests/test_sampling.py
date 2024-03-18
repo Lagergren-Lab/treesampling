@@ -1,3 +1,4 @@
+import h5py
 import numpy as np
 import networkx as nx
 import itertools
@@ -5,6 +6,7 @@ from scipy.stats import chisquare
 
 from treesampling import algorithms
 import treesampling.utils.graphs as tg
+from treesampling.algorithms import random_spanning_tree_log
 
 
 def test_log_random_uniform_graph():
@@ -124,7 +126,68 @@ def test_uniform_graph_sampling():
     assert test_result.pvalue >= 0.95, f"chisq test not passed: evidence that distribution is not uniform"
 
 
+def test_unbalanced_weights():
+    root = 0
+    n_nodes = 8
+    low_val = -3000
+    high_val = -1
+    adj_matrix = np.ones((n_nodes, n_nodes)) * low_val
+    np.fill_diagonal(adj_matrix, -np.inf)  # no self connections
+    adj_matrix[:, root] = -np.inf  # no arcs into root
+    # add some high vals
+    adj_matrix[0, 1] = high_val
+    adj_matrix[1, 2] = high_val
+    adj_matrix[2, 3] = high_val
+    adj_matrix[3, 4] = high_val
+    adj_matrix[4, 5] = high_val
+    adj_matrix[5, 6] = high_val
+    adj_matrix[6, 7] = high_val
+
+    graph = nx.complete_graph(n_nodes, create_using=nx.DiGraph)
+    graph = tg.reset_adj_matrix(graph, adj_matrix)
+    tree = algorithms.random_spanning_tree_log(graph, root, trick=False)
+    exp_graph = tg.reset_adj_matrix(graph, np.exp(adj_matrix))
+    assert tg.tree_to_newick(tree) == tg.tree_to_newick(nx.maximum_spanning_arborescence(exp_graph))
 
 
+def test_cyclic_graph():
+    root = 0
+    n_nodes = 5
+    low_val = -3000
+    high_val = -1
+    adj_matrix = np.ones((n_nodes, n_nodes)) * low_val
+    np.fill_diagonal(adj_matrix, -np.inf)  # no self connections
+    adj_matrix[:, root] = -np.inf  # no arcs into root
+    # add some high vals
+    adj_matrix[0, 1] = high_val
+    adj_matrix[2, 1] = high_val
+    adj_matrix[3, 1] = high_val
+    adj_matrix[4, 1] = high_val
+
+    graph = nx.complete_graph(n_nodes, create_using=nx.DiGraph)
+    graph = tg.reset_adj_matrix(graph, adj_matrix)
+    tree = algorithms.random_spanning_tree_log(graph, root, trick=False)
+    exp_graph = tg.reset_adj_matrix(graph, np.exp(adj_matrix))
+    assert tg.tree_to_newick(tree) == tg.tree_to_newick(nx.maximum_spanning_arborescence(exp_graph))
 
 
+def test_victree_output():
+    K = 12
+    vic_out = h5py.File("/Users/zemp/phd/scilife/victree-experiments/SA501X3F/victree-out/K12/victree.out.h5ad",
+                        'r')
+    graph_matrix = vic_out['uns']['victree-tree-graph'][:]
+    graph = nx.complete_graph(K, create_using=nx.DiGraph)
+    for u, v in itertools.product(range(K), repeat=2):
+        if v == 0 or u == v:
+            graph_matrix[u, v] = -np.inf
+    graph = tg.reset_adj_matrix(graph, graph_matrix)
+    ss = 100
+    sample = {}
+    for i in range(ss):
+        tree = random_spanning_tree_log(graph, root=0, trick=False)
+        tnwk = tg.tree_to_newick(tree)
+        if tnwk not in sample:
+            sample[tnwk] = 0
+        sample[tnwk] += 1
+    max_freq_tree_nwk = max(sample, key=sample.get)
+    assert max_freq_tree_nwk == '(((2,(10)6,7,8)1,(9)3,4,11)5)0'
