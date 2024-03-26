@@ -146,6 +146,20 @@ def tuttes_tot_weight(graph: nx.DiGraph, root, weight='weight'):
     return np.linalg.det(L1r)
 
 
+def kirchhoff_tot_weight(graph, minor_row=0, minor_col=0):
+    """
+    Total sum of weights for undirected spanning trees in given (weighted) graph
+    :param graph: nx.graph, can have weights
+    :param minor_row: row to be removed for minor calculation
+    :param minor_col: col to be removed for minor calculation
+    :return:
+    """
+    norm_graph = normalize_graph_weights(graph)
+    lap2 = nx.laplacian_matrix(norm_graph).toarray()
+    lap_tot_weight = np.linalg.det(mat_minor(lap2, minor_row, minor_col))
+    return lap_tot_weight
+
+
 def cayleys_formula(n):
     assert n > 1
     return n**(n-2)

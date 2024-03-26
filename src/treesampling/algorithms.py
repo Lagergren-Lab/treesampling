@@ -79,7 +79,9 @@ def random_spanning_tree(in_graph: nx.DiGraph, root, trick=True) -> nx.DiGraph:
         # print(f"\tdangling path: {dangling_path}")
         # choose new i if no dangling nodes
         if not dangling_path:
-            i_vertex = random.choice(x_list)
+            # NOTE: stochastic vs sorted choice (should not matter)
+            # i_vertex = random.choice(x_list)
+            i_vertex = x_list[0]
             x_list.remove(i_vertex)
         # or set last node
         else:
@@ -202,10 +204,17 @@ def _compute_lexit_table_log(i, x_list: list,  wx_table: dict, tree: nx.DiGraph,
 def _update_wx_log(wy_table, u) -> dict:
     # speed up trick
     wx_table = {}
-    for (v, w) in wy_table.keys():
-        if v != u and w != u:
-            # FIXME: solve for when inf - inf
-            wx_table[v, w] = logsubexp(wy_table[v, w], wy_table[v, u] + wy_table[u, w] - wy_table[u, u])
+    if wy_table[u, u] == - np.inf:
+        wx_table = wy_table
+    else:
+        for (v, w) in wy_table.keys():
+            if v != u and w != u:
+                if wy_table[v, w] == - np.inf:
+                    # wx can't be any less than that (avoids logsubexp(-inf, a) where -np.inf < a << 0 )
+                    a = - np.inf
+                else:
+                    a = logsubexp(wy_table[v, w], wy_table[v, u] + wy_table[u, w] - wy_table[u, u])
+                wx_table[v, w] = a
     return wx_table
 
 
@@ -310,8 +319,11 @@ def _compute_wx_table_log(graph: nx.DiGraph, x_set: list) -> dict:
         # compute Ry(u) where u is Y \ X (u)
         ry_1 = - np.infty
         for (v, w) in wx.keys():
+            # this might lead to ry_1 being slightly larger than 1,
+            # but only ry_1 < 0 (strictly) is allowed
             ry_1 = np.logaddexp(ry_1, graph.edges()[u, v]['weight'] + wx[v, w] + graph.edges()[w, u]['weight'])
-        # stable exponentiation
+        ry_1 = np.clip(ry_1, a_min=None, a_max=-1e-10)
+        # stable exponentiation: if ry_1 << 0 in log scale, then geometric series will be = 1 anyway
         ry = - np.log(1 - np.exp(ry_1))
 
         # compute Wy
@@ -341,51 +353,74 @@ def _compute_wx_table_log(graph: nx.DiGraph, x_set: list) -> dict:
     return wx
 
 
+def wilson_rst(graph: nx.DiGraph, root=0):
+    n_nodes = graph.number_of_nodes()
+    # normalize graph
+    norm_graph = normalize_graph_weights(graph)
+    weights = nx.to_numpy_array(norm_graph)
+    tree = nx.DiGraph()
+    t_set = {root}
+    x_set = {x for x in list(range(n_nodes))}.difference(t_set)
+    # pick random node from x
+    prev = [None] * n_nodes
+    while x_set:
+        i = random.choice(list(x_set))
+        u = i
+        while u not in t_set:
+            # loop-erased random walk
+            prev[u] = random.choices(range(n_nodes), k=1, weights=weights[:, u])[0]
+            u = prev[u]
+        u = i
+        while u not in t_set:
+            # add to tree
+            tree.add_edge(prev[u], u, weight=weights[prev[u], u])
+            x_set.remove(u)
+            t_set.add(u)
+            u = prev[u]
+    return tree
+
+
 if __name__ == '__main__':
-    log_scale_weights = True  # change
-    results_csv_path = "../../output/uniform_log_graph_corr_time.csv"
-    # write header
-    with open(results_csv_path, 'w') as fd:
-        writer = csv.writer(fd)
-        writer.writerow(['n_nodes', 'sample_size', 'time', 'correlation'])
-
     # repeat for different number of nodes
-    for n_nodes in [5, 6, 7, 8, 9, 10]:
+    for n_nodes in [8, 9, 10]:
         trees_sample = {}
-        graph = random_uniform_graph(n_nodes, log_scale_weights)
-        times = []
-        sample_sizes = [100, 500, 1000, 2000]
-        results = []
-        for i in range(len(sample_sizes)):
-            prev_time = 0 if i == 0 else times[-1]
-            prev_ss = 0 if i == 0 else sample_sizes[i-1]
-            sample_size = sample_sizes[i]
+        graph = random_uniform_graph(n_nodes)
+        sample_size = 500
 
-            start = time.time()
-            for i in range(sample_size - prev_ss):
-                tree = random_spanning_tree_log(graph, None)
-                tree_newick = tree_to_newick(tree)
-                if tree_newick not in trees_sample:
-                    trees_sample[tree_newick] = (1, tree)
-                else:
-                    trees_sample[tree_newick] = (trees_sample[tree_newick][0] + 1, tree)
-            end = time.time() - start
-            times.append(end + prev_time)
+        # our vs wilson: uniform graph
+        start = time.time()
+        for s in range(sample_size):
+            tree = random_spanning_tree(graph, 0)
+        print(f"our time ss = {sample_size}, k = {n_nodes}: {time.time() - start}")
+        start = time.time()
+        for s in range(sample_size):
+            tree = wilson_rst(graph, 0)
+        print(f"wilson time ss = {sample_size}, k = {n_nodes}: {time.time() - start}")
+        # print(tree_to_newick(tree))
 
-            tree_freqs = []  # frequency of tree in a sample
-            tree_weights = []  # weight of tree in the sample
-            for t_nwk, (prop, t) in trees_sample.items():
-                tree_freqs.append(prop / sample_size)
-                tree_weights.append(np.exp(graph_weight(t, log_probs=log_scale_weights)))
-                # print(f"\t{tree_freqs[-1]} : {tree_weights[-1]}"
-                #       f" newick: {t_nwk}")
-            correlation = np.corrcoef(tree_freqs, tree_weights)[0, 1]
-            # print(f"Correlation coeff: {correlation}")
-            # # print time
-            # print(f"K = {n_nodes}: sampled {sample_size} trees in {times[-1]}s")
-            results.append([n_nodes, sample_size, times[-1], correlation])
-            print(f"{results[-1]}")
-        with open(results_csv_path, 'a') as fd:
-            writer = csv.writer(fd)
-            for r in results:
-                writer.writerow(r)
+    # 2-components weakly connected graph
+    print("2 weakly connected components test")
+    n_nodes = 8
+    trees_sample = {}
+    weights = np.random.random((n_nodes, n_nodes))
+    component2 = [5, 6, 7]
+    # divide into two components
+    for i in range(n_nodes):
+        for j in range(n_nodes):
+            if (i in component2) ^ (j in component2):
+                weights[i, j] = np.random.random(1) * 1e-3
+    np.fill_diagonal(weights, 0)
+
+    graph = nx.from_numpy_array(weights)
+    sample_size = 500
+
+    # our vs wilson: uniform graph
+    start = time.time()
+    for s in range(sample_size):
+        tree = random_spanning_tree(graph, 0)
+    print(f"our time ss = {sample_size}, k = {n_nodes}: {time.time() - start}")
+    start = time.time()
+    for s in range(sample_size):
+        tree = wilson_rst(graph, 0)
+    print(f"wilson time ss = {sample_size}, k = {n_nodes}: {time.time() - start}")
+        # print(tree_to_newick(tree))

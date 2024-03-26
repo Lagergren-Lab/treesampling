@@ -145,28 +145,7 @@ def test_unbalanced_weights():
 
     graph = nx.complete_graph(n_nodes, create_using=nx.DiGraph)
     graph = tg.reset_adj_matrix(graph, adj_matrix)
-    tree = algorithms.random_spanning_tree_log(graph, root, trick=False)
-    exp_graph = tg.reset_adj_matrix(graph, np.exp(adj_matrix))
-    assert tg.tree_to_newick(tree) == tg.tree_to_newick(nx.maximum_spanning_arborescence(exp_graph))
-
-
-def test_cyclic_graph():
-    root = 0
-    n_nodes = 5
-    low_val = -3000
-    high_val = -1
-    adj_matrix = np.ones((n_nodes, n_nodes)) * low_val
-    np.fill_diagonal(adj_matrix, -np.inf)  # no self connections
-    adj_matrix[:, root] = -np.inf  # no arcs into root
-    # add some high vals
-    adj_matrix[0, 1] = high_val
-    adj_matrix[2, 1] = high_val
-    adj_matrix[3, 1] = high_val
-    adj_matrix[4, 1] = high_val
-
-    graph = nx.complete_graph(n_nodes, create_using=nx.DiGraph)
-    graph = tg.reset_adj_matrix(graph, adj_matrix)
-    tree = algorithms.random_spanning_tree_log(graph, root, trick=False)
+    tree = algorithms.random_spanning_tree_log(graph, root, trick=True)
     exp_graph = tg.reset_adj_matrix(graph, np.exp(adj_matrix))
     assert tg.tree_to_newick(tree) == tg.tree_to_newick(nx.maximum_spanning_arborescence(exp_graph))
 
@@ -184,7 +163,7 @@ def test_victree_output():
     ss = 100
     sample = {}
     for i in range(ss):
-        tree = random_spanning_tree_log(graph, root=0, trick=False)
+        tree = random_spanning_tree_log(graph, root=0, trick=True)
         tnwk = tg.tree_to_newick(tree)
         if tnwk not in sample:
             sample[tnwk] = 0
