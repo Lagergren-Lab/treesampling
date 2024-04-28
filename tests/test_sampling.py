@@ -170,3 +170,31 @@ def test_victree_output():
         sample[tnwk] += 1
     max_freq_tree_nwk = max(sample, key=sample.get)
     assert max_freq_tree_nwk == '(((2,(10)6,7,8)1,(9)3,4,11)5)0'
+
+
+def test_wilson_rst():
+    n_nodes = 7
+    adj_mat = np.ones((n_nodes, n_nodes))
+    np.fill_diagonal(adj_mat, 0)
+    # cardinality of tree topology
+    tot_trees = tg.cayleys_formula(n_nodes)
+
+    for log_probs in [False, True]:
+        adj_mat = np.log(adj_mat) if log_probs else adj_mat
+        graph = nx.from_numpy_array(adj_mat)
+        sample_size = 3 * tot_trees
+        sample_dict = {}
+        for s in range(sample_size):
+            tree = algorithms.wilson_rst(graph, root=0, log_probs=log_probs)
+            tree_nwk = tg.tree_to_newick(tree)
+            if tree_nwk not in sample_dict:
+                sample_dict[tree_nwk] = 0
+            sample_dict[tree_nwk] = sample_dict[tree_nwk] + 1
+
+        unique_trees_obs = len(sample_dict)
+        freqs = np.pad(np.array([v for k, v in sample_dict.items()]) / sample_size,
+                       (0, tot_trees - unique_trees_obs))
+        # test against uniform distribution
+        test_result = chisquare(f_obs=freqs)
+        assert test_result.pvalue >= 0.95, (f"chisq test not passed: evidence that distribution is not uniform"
+                                            f" [log_probs = {log_probs}]")

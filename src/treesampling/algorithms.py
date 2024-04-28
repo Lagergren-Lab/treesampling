@@ -322,7 +322,8 @@ def _compute_wx_table_log(graph: nx.DiGraph, x_set: list) -> dict:
             # this might lead to ry_1 being slightly larger than 1,
             # but only ry_1 < 0 (strictly) is allowed
             ry_1 = np.logaddexp(ry_1, graph.edges()[u, v]['weight'] + wx[v, w] + graph.edges()[w, u]['weight'])
-        ry_1 = np.clip(ry_1, a_min=None, a_max=-1e-10)
+        # TODO: check if the following commented hack is necessary or not
+        # ry_1 = np.clip(ry_1, a_min=None, a_max=-1e-10)
         # stable exponentiation: if ry_1 << 0 in log scale, then geometric series will be = 1 anyway
         ry = - np.log(1 - np.exp(ry_1))
 
@@ -338,6 +339,8 @@ def _compute_wx_table_log(graph: nx.DiGraph, x_set: list) -> dict:
                 wyx[v] = np.logaddexp(wyx[v], wx[vv, v] + graph.edges()[u, vv]['weight'])
 
         # write new W table
+        # FIXME: when ry is infty, then normalize all wx entries by removing ry
+        #   i.e. set ry to zero and wx to zero (cause all new paths will pass through u
         for v in x:
             # special case: start or end in new vertex u
             wy[u, v] = ry + wyx[v]
@@ -353,10 +356,10 @@ def _compute_wx_table_log(graph: nx.DiGraph, x_set: list) -> dict:
     return wx
 
 
-def wilson_rst(graph: nx.DiGraph, root=0):
+def wilson_rst(graph: nx.DiGraph, root=0, log_probs: bool = False):
     n_nodes = graph.number_of_nodes()
     # normalize graph
-    norm_graph = normalize_graph_weights(graph)
+    norm_graph = normalize_graph_weights(graph, log_probs=log_probs)
     weights = nx.to_numpy_array(norm_graph)
     tree = nx.DiGraph()
     t_set = {root}
@@ -368,7 +371,10 @@ def wilson_rst(graph: nx.DiGraph, root=0):
         u = i
         while u not in t_set:
             # loop-erased random walk
-            prev[u] = random.choices(range(n_nodes), k=1, weights=weights[:, u])[0]
+            if log_probs:
+                prev[u] = gumbel_max_trick_sample(weights[:, u])
+            else:
+                prev[u] = random.choices(range(n_nodes), k=1, weights=weights[:, u])[0]
             u = prev[u]
         u = i
         while u not in t_set:
