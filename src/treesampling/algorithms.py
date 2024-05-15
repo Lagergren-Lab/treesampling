@@ -356,6 +356,16 @@ def _compute_wx_table_log(graph: nx.DiGraph, x_set: list) -> dict:
     return wx
 
 
+def kirchoff_rst(graph: nx.DiGraph, root=0, log_probs: bool = False):
+    if log_probs:
+        raise ValueError("Kirchoff RST not implemented for log-probabilities")
+    # initialize empty digraph
+    tree = nx.DiGraph()
+    # for each edge, contract that edge and compute the acceptance probability
+    # TODO: implement
+
+    return tree
+
 def wilson_rst(graph: nx.DiGraph, root=0, log_probs: bool = False):
     n_nodes = graph.number_of_nodes()
     # normalize graph

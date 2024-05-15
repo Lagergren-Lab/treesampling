@@ -128,7 +128,21 @@ def mat_minor(mat, row, col):
     return mat[ridx[:, np.newaxis], cidx]
 
 
-def tuttes_tot_weight(graph: nx.DiGraph, root, weight='weight'):
+def adjoint(mat):
+    """
+    Adjoint of a matrix
+    :param mat: 2D numpy array
+    :return:
+    """
+    M, N = mat.shape
+    adj = np.zeros_like(mat)
+    for i in range(M):
+        for j in range(N):
+            adj[i, j] = (-1)**(i + j) * np.linalg.det(mat_minor(mat, i, j))
+    return adj
+
+
+def tuttes_tot_weight(graph: nx.DiGraph, root, weight='weight', contracted_edge=None):
     """
     Ref: https://arxiv.org/pdf/1904.12221.pdf
     :param graph: directed graph with weights
@@ -138,9 +152,13 @@ def tuttes_tot_weight(graph: nx.DiGraph, root, weight='weight'):
     """
 
     A = nx.to_numpy_array(graph, weight=weight)
+    if contracted_edge is not None:
+        A[:, contracted_edge[1]] = 0
+        A[contracted_edge[0], contracted_edge[1]] = 1
     np.fill_diagonal(A, 0)
     Din = np.diag(np.sum(A, axis=0))
     L1 = Din - A
+    # L1 is also known as Kirchoff matrix (as in Colbourn 1996)
     L1r = mat_minor(L1, row=root, col=root)
 
     return np.linalg.det(L1r)

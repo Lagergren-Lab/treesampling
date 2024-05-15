@@ -1,9 +1,10 @@
 import numpy as np
 import networkx as nx
+from statsmodels.stats.proportion import proportions_ztest
 
 import treesampling.algorithms as ta
 from treesampling.utils.graphs import enumerate_rooted_trees, cayleys_formula, kirchhoff_tot_weight, \
-    normalize_graph_weights, tree_to_newick
+    normalize_graph_weights, tree_to_newick, reset_adj_matrix, tuttes_tot_weight, graph_weight, adjoint
 from treesampling.utils.math import generate_random_matrix
 
 
@@ -12,6 +13,50 @@ def test_enumerate_rooted_trees():
     trees = enumerate_rooted_trees(n_nodes)
     tot_trees = cayleys_formula(n_nodes)
     assert len(trees) == tot_trees
+
+
+def test_edge_contraction():
+    n_nodes = 7
+    # generate random adjacency matrix
+    graph = nx.complete_graph(n_nodes, create_using=nx.DiGraph)
+    weights = np.random.random((n_nodes, n_nodes))
+    graph = reset_adj_matrix(graph, weights)
+    graph = normalize_graph_weights(graph)
+    e = (1, 2)
+    e_weight = graph.edges()[e]['weight']
+    # print(f"adj matrix: {weights}")
+    print(f"contracted edge weight: {e_weight}")
+    tot_weight = tuttes_tot_weight(graph, root=0)
+    tuttes_proportion = tuttes_tot_weight(graph, root=0, contracted_edge=e) * e_weight / tot_weight
+
+    # now sample many trees and check the proportion of trees which contain that edge
+    sample_size = 1000
+    tree_proportion_with_e = 0
+    for s in range(sample_size):
+        tree = ta.random_spanning_tree(graph, root=0)
+        if e in tree.edges:
+            tree_proportion_with_e += 1
+    tree_proportion_with_e /= sample_size
+    # FIXME: these 2 values should be closer than they are
+    # print the two proportions with annotations
+    print(f"the following should be as equal as possible (sample size {sample_size}")
+    print(f"empirical proportion of trees with edge e {e}: {tree_proportion_with_e}")
+    print(f"proportion of weight of trees with edge e {e} (tuttes): {tuttes_proportion}")
+
+    # prop test to verify whether the difference is statistically significant
+    stat, pval = proportions_ztest(tree_proportion_with_e * sample_size, sample_size, value=tuttes_proportion)
+    print(f"pval: {pval}")
+
+    # test with adjoint
+    # compute the kirchhoff matrix
+    # FIXME: why the adjoint method is not working?
+    np.fill_diagonal(weights, 0)
+    Din = np.diag(np.sum(weights, axis=0))
+    K = Din - weights
+    adjoint_K = adjoint(K)
+    tot_weight_with_e = (adjoint_K[e[0], e[0]] - adjoint_K[e[1], e[0]])  # * e_weight
+    print("with adjoint formula given in the Colbourn paper (Lemma 3.1)")
+    print(f"{tot_weight_with_e / tot_weight} == {tuttes_proportion}")
 
 
 def test_kirchhoff_tot_weight():
