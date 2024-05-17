@@ -16,7 +16,7 @@ def test_enumerate_rooted_trees():
 
 
 def test_edge_contraction():
-    n_nodes = 7
+    n_nodes = 10
     # generate random adjacency matrix
     graph = nx.complete_graph(n_nodes, create_using=nx.DiGraph)
     weights = np.random.random((n_nodes, n_nodes))
@@ -27,10 +27,14 @@ def test_edge_contraction():
     # print(f"adj matrix: {weights}")
     print(f"contracted edge weight: {e_weight}")
     tot_weight = tuttes_tot_weight(graph, root=0)
-    tuttes_proportion = tuttes_tot_weight(graph, root=0, contracted_edge=e) * e_weight / tot_weight
+    tot_contracted_weight = tuttes_tot_weight(graph, root=0, contracted_arcs=[e])
+    tot_deleted_weight = tuttes_tot_weight(graph, root=0, deleted_arcs=[e])
+    # compare tot weight and sum of contracted and deleted weight
+    print(tot_weight, tot_contracted_weight * e_weight + tot_deleted_weight * (1 - e_weight))
+    tuttes_proportion = tuttes_tot_weight(graph, root=0, contracted_arcs=[e]) * e_weight / tot_weight
 
     # now sample many trees and check the proportion of trees which contain that edge
-    sample_size = 1000
+    sample_size = 5000
     tree_proportion_with_e = 0
     for s in range(sample_size):
         tree = ta.random_spanning_tree(graph, root=0)
@@ -39,7 +43,7 @@ def test_edge_contraction():
     tree_proportion_with_e /= sample_size
     # FIXME: these 2 values should be closer than they are
     # print the two proportions with annotations
-    print(f"the following should be as equal as possible (sample size {sample_size}")
+    print(f"the following should be as equal as possible (sample size {sample_size})")
     print(f"empirical proportion of trees with edge e {e}: {tree_proportion_with_e}")
     print(f"proportion of weight of trees with edge e {e} (tuttes): {tuttes_proportion}")
 

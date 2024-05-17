@@ -5,7 +5,7 @@ import numpy as np
 import csv
 
 from treesampling.utils.math import logsubexp, gumbel_max_trick_sample
-from treesampling.utils.graphs import tree_to_newick, graph_weight
+from treesampling.utils.graphs import tree_to_newick, graph_weight, tuttes_tot_weight
 
 from treesampling.utils.graphs import random_uniform_graph, normalize_graph_weights
 
@@ -359,12 +359,47 @@ def _compute_wx_table_log(graph: nx.DiGraph, x_set: list) -> dict:
 def kirchoff_rst(graph: nx.DiGraph, root=0, log_probs: bool = False):
     if log_probs:
         raise ValueError("Kirchoff RST not implemented for log-probabilities")
+    # normalize graph weights
+    graph = normalize_graph_weights(graph, log_probs=log_probs)
+
     # initialize empty digraph
     tree = nx.DiGraph()
-    # for each edge, contract that edge and compute the acceptance probability
-    # TODO: implement
+    edge_candidates = list(graph.edges())
+    aa = tuttes_tot_weight(graph, root)
+    excluded_edges = []
+    while len(tree.edges()) < graph.number_of_nodes() - 1:
+        # pick random edge
+        print(edge_candidates)
+        edge = random.choice(edge_candidates)
+        edge_candidates.remove(edge)
+        # sample uniform (0,1) and check if edge is added
+        # sum of weights of trees including tree edges
+        a = aa
+        # sum of weights of trees including tree edges + e (a' in Kulkarni A8)
+        # FIXME: this is 0 at first iteration
+        aa = tuttes_tot_weight(graph, root,
+                               contracted_arcs=[e for e in tree.edges()] + [edge], deleted_arcs=excluded_edges)
+        acceptance_ratio = graph.edges()[edge]['weight'] * aa / a
+        print(f"a: {a}, aa: {aa}")
+        print(f"acceptance ratio: {acceptance_ratio}")
+        if random.random() < acceptance_ratio:
+            print(f"adding edge {edge}")
+            tree.add_edge(*edge)
+            tree.edges()[edge]['weight'] = graph.edges()[edge]['weight']
+            # remove edges going in edge[1] from candidates
+            for e in edge_candidates.copy():
+                if e[1] == edge[1]:
+                    edge_candidates.remove(e)
+        else:
+            print(f"excluding edge {edge}")
+            # exclude edge from future consideration
+            excluded_edges.append(edge)
+            # recompute aa
+            aa = tuttes_tot_weight(graph, root,
+                                   contracted_arcs=[e for e in tree.edges()] + [edge], deleted_arcs=excluded_edges)
 
     return tree
+
 
 def wilson_rst(graph: nx.DiGraph, root=0, log_probs: bool = False):
     n_nodes = graph.number_of_nodes()
@@ -412,6 +447,10 @@ if __name__ == '__main__':
         for s in range(sample_size):
             tree = wilson_rst(graph, 0)
         print(f"wilson time ss = {sample_size}, k = {n_nodes}: {time.time() - start}")
+        start = time.time()
+        for s in range(sample_size):
+            tree = kirchoff_rst(graph, 0)
+        print(f"kirchoff time ss = {sample_size}, k = {n_nodes}: {time.time() - start}")
         # print(tree_to_newick(tree))
 
     # 2-components weakly connected graph

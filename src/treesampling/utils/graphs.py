@@ -142,7 +142,7 @@ def adjoint(mat):
     return adj
 
 
-def tuttes_tot_weight(graph: nx.DiGraph, root, weight='weight', contracted_edge=None):
+def tuttes_tot_weight(graph: nx.DiGraph, root, weight='weight', contracted_arcs=None, deleted_arcs=None):
     """
     Ref: https://arxiv.org/pdf/1904.12221.pdf
     :param graph: directed graph with weights
@@ -150,11 +150,19 @@ def tuttes_tot_weight(graph: nx.DiGraph, root, weight='weight', contracted_edge=
     :return: the total weight sum of all spanning arborescence
      weights (that is the product of the tree arc weights)
     """
+    contracted_arcs = contracted_arcs if contracted_arcs else []
+    deleted_arcs = deleted_arcs if deleted_arcs else []
 
     A = nx.to_numpy_array(graph, weight=weight)
-    if contracted_edge is not None:
-        A[:, contracted_edge[1]] = 0
-        A[contracted_edge[0], contracted_edge[1]] = 1
+    # contract arcs
+    for arc in contracted_arcs:
+        A[:, arc[1]] = 0
+        A[arc[0], arc[1]] = 1
+    # delete arcs
+    for arc in deleted_arcs:
+        A[arc[0], arc[1]] = 0
+        # re-normalize
+        A[:, arc[1]] = A[:, arc[1]] / A[:, arc[1]].sum()
     np.fill_diagonal(A, 0)
     Din = np.diag(np.sum(A, axis=0))
     L1 = Din - A

@@ -27,7 +27,7 @@ def test_random_k_trees_graph():
     norm_graph = tg.normalize_graph_weights(graph)
 
     # Kirchhoff theorem for directed graphs, to get total weight of all trees
-    tot_weight = tg.tuttes_tot_weight(norm_graph, root)
+    tot_weight = tg.tuttes_tot_weight(norm_graph, root, contracted_arcs=None)
     log_graph = tg.reset_adj_matrix(graph, np.log(nx.to_numpy_array(norm_graph)))
 
     assert tg.tree_to_newick(nx.maximum_spanning_arborescence(norm_graph)) == tg.tree_to_newick(mst_tree)
@@ -97,7 +97,7 @@ def test_laplacian():
         tw = tg.graph_weight(tree)
         tot_weight0 += tw
 
-    laplacian_tot_weight = tg.tuttes_tot_weight(norm_graph, 0)
+    laplacian_tot_weight = tg.tuttes_tot_weight(norm_graph, 0, contracted_arcs=None)
     assert np.isclose(tot_weight0, laplacian_tot_weight)
 
 
