@@ -4,6 +4,8 @@ import networkx as nx
 import numpy as np
 import csv
 
+from treesample.colbourn import ColbournSample
+
 from treesampling.utils.math import logsubexp, gumbel_max_trick_sample
 from treesampling.utils.graphs import tree_to_newick, graph_weight, tuttes_tot_weight
 
@@ -364,39 +366,41 @@ def kirchoff_rst(graph: nx.DiGraph, root=0, log_probs: bool = False):
 
     # initialize empty digraph
     tree = nx.DiGraph()
-    edge_candidates = list(graph.edges())
+    arc_candidates = sorted([e for e in graph.edges() if e[0] != e[1]], key=lambda x: graph.edges()[x]['weight'])
     aa = tuttes_tot_weight(graph, root)
-    excluded_edges = []
+    deleted_arcs = []
     while len(tree.edges()) < graph.number_of_nodes() - 1:
-        # pick random edge
-        print(edge_candidates)
-        edge = random.choice(edge_candidates)
-        edge_candidates.remove(edge)
+        # pick edge (sorted by weight so to increase acceptance ratio)
+        print(arc_candidates)
+        print(tree.edges())
+        arc = arc_candidates.pop(0)
         # sample uniform (0,1) and check if edge is added
         # sum of weights of trees including tree edges
         a = aa
         # sum of weights of trees including tree edges + e (a' in Kulkarni A8)
-        # FIXME: this is 0 at first iteration
-        aa = tuttes_tot_weight(graph, root,
-                               contracted_arcs=[e for e in tree.edges()] + [edge], deleted_arcs=excluded_edges)
-        acceptance_ratio = graph.edges()[edge]['weight'] * aa / a
+        aa = 1. if not tree.edges() else graph_weight(tree)
+        aa *= graph.edges()[arc]['weight'] * tuttes_tot_weight(graph, root,
+                                                               contracted_arcs=[e for e in tree.edges()] + [arc],
+                                                               deleted_arcs=deleted_arcs)
+        acceptance_ratio = aa / a
         print(f"a: {a}, aa: {aa}")
         print(f"acceptance ratio: {acceptance_ratio}")
         if random.random() < acceptance_ratio:
-            print(f"adding edge {edge}")
-            tree.add_edge(*edge)
-            tree.edges()[edge]['weight'] = graph.edges()[edge]['weight']
-            # remove edges going in edge[1] from candidates
-            for e in edge_candidates.copy():
-                if e[1] == edge[1]:
-                    edge_candidates.remove(e)
+            print(f"adding edge {arc}")
+            tree.add_edge(*arc)
+            tree.edges()[arc]['weight'] = graph.edges()[arc]['weight']
+            # remove edges going in edge[1] from candidates or opposite
+            for e in arc_candidates.copy():
+                if e[1] == arc[1] or e[::-1] == arc:
+                    arc_candidates.remove(e)
         else:
-            print(f"excluding edge {edge}")
+            print(f"excluding edge {arc}")
             # exclude edge from future consideration
-            excluded_edges.append(edge)
+            deleted_arcs.append(arc)
             # recompute aa
-            aa = tuttes_tot_weight(graph, root,
-                                   contracted_arcs=[e for e in tree.edges()] + [edge], deleted_arcs=excluded_edges)
+            aa = 1. if not tree.edges() else graph_weight(tree)
+            aa *= tuttes_tot_weight(graph, root, contracted_arcs=[e for e in tree.edges()],
+                                    deleted_arcs=deleted_arcs)
 
     return tree
 
@@ -431,6 +435,29 @@ def wilson_rst(graph: nx.DiGraph, root=0, log_probs: bool = False):
     return tree
 
 
+def nxtree_from_tuple(tree_tuple: tuple):
+    nx_tree = nx.DiGraph()
+    for i, j in zip(tree_tuple[1:], np.arange(1, len(tree_tuple))):
+        nx_tree.add_edge(i, j)
+    return nx_tree
+
+
+def colbourn_rst(graph: nx.DiGraph, root=0, log_probs: bool = False):
+    if root != 0:
+        raise ValueError("Root different than 0 not implemented, please remap graph nodes accordingly")
+    if log_probs:
+        raise ValueError("Colbourne RST not implemented for log-probabilities")
+    # normalize graph weights
+    graph = normalize_graph_weights(graph, log_probs=log_probs)
+    W = nx.to_numpy_array(graph)
+    colbourn = ColbournSample(W)
+    tree_tuple, p = colbourn._sample()
+    tree = nxtree_from_tuple(tree_tuple)
+    for e in tree.edges():
+        tree.edges()[e]['weight'] = graph.edges()[e]['weight']
+    return tree
+
+
 if __name__ == '__main__':
     # repeat for different number of nodes
     for n_nodes in [8, 9, 10]:
@@ -449,8 +476,8 @@ if __name__ == '__main__':
         print(f"wilson time ss = {sample_size}, k = {n_nodes}: {time.time() - start}")
         start = time.time()
         for s in range(sample_size):
-            tree = kirchoff_rst(graph, 0)
-        print(f"kirchoff time ss = {sample_size}, k = {n_nodes}: {time.time() - start}")
+            tree = colbourn_rst(graph, 0)
+        print(f"colbourn time ss = {sample_size}, k = {n_nodes}: {time.time() - start}")
         # print(tree_to_newick(tree))
 
     # 2-components weakly connected graph

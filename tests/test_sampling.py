@@ -105,7 +105,7 @@ def test_uniform_graph_sampling():
     n_nodes = 7
     adj_mat = np.ones((n_nodes, n_nodes))
     np.fill_diagonal(adj_mat, 0)
-    graph = nx.from_numpy_array(adj_mat)
+    graph = nx.from_numpy_array(adj_mat, create_using=nx.DiGraph)
     # cardinality of tree topology
     tot_trees = tg.cayleys_formula(n_nodes)
 
@@ -181,7 +181,7 @@ def test_wilson_rst():
 
     for log_probs in [False, True]:
         adj_mat = np.log(adj_mat) if log_probs else adj_mat
-        graph = nx.from_numpy_array(adj_mat)
+        graph = nx.from_numpy_array(adj_mat, create_using=nx.DiGraph)
         sample_size = 3 * tot_trees
         sample_dict = {}
         for s in range(sample_size):
@@ -198,3 +198,62 @@ def test_wilson_rst():
         test_result = chisquare(f_obs=freqs)
         assert test_result.pvalue >= 0.95, (f"chisq test not passed: evidence that distribution is not uniform"
                                             f" [log_probs = {log_probs}]")
+
+
+def test_colbourn_rst():
+    n_nodes = 7
+    adj_mat = np.ones((n_nodes, n_nodes))
+    np.fill_diagonal(adj_mat, 0)
+    # cardinality of tree topology
+    tot_trees = tg.cayleys_formula(n_nodes)
+
+    adj_mat = adj_mat
+    graph = nx.from_numpy_array(adj_mat, create_using=nx.DiGraph)
+    sample_size = 3 * tot_trees
+    sample_dict = {}
+    for s in range(sample_size):
+        tree = algorithms.colbourn_rst(graph, root=0, log_probs=False)
+        tree_nwk = tg.tree_to_newick(tree)
+        if tree_nwk not in sample_dict:
+            sample_dict[tree_nwk] = 0
+        sample_dict[tree_nwk] = sample_dict[tree_nwk] + 1
+
+    unique_trees_obs = len(sample_dict)
+    freqs = np.pad(np.array([v for k, v in sample_dict.items()]) / sample_size,
+                   (0, tot_trees - unique_trees_obs))
+    # test against uniform distribution
+    test_result = chisquare(f_obs=freqs)
+    assert test_result.pvalue >= 0.95, (f"chisq test not passed: evidence that distribution is not uniform")
+
+
+def test_weakly_connection_colbourn():
+    n_nodes = 6
+    n_samples = 5000
+
+    for weak_weight in [1e-30, 1e-50, 1e-100, 1e-150, 1e-200, 1e-300, 1e-500]:
+        graph = tg.random_weakly_connected_graph(n_nodes, weak_weight=weak_weight)
+        sample_dict = {}
+        weight_dict = {}
+        for _ in range(n_samples):
+            tree = algorithms.colbourn_rst(graph, root=0, log_probs=False)
+            tree_nwk = tg.tree_to_newick(tree)
+
+            if tree_nwk not in sample_dict:
+                sample_dict[tree_nwk] = 0
+                weight_dict[tree_nwk] = tg.graph_weight(tree)
+            sample_dict[tree_nwk] = sample_dict[tree_nwk] + 1
+
+        unique_trees_obs = len(sample_dict)
+        freqs = np.pad(np.array([v for k, v in sample_dict.items()]) / n_samples,
+                       (0, tg.cayleys_formula(n_nodes) - unique_trees_obs))
+        fexp = np.pad(np.array([weight_dict[t] for t, _ in sample_dict.items()]),
+                      (0, tg.cayleys_formula(n_nodes) - unique_trees_obs))
+        fexp /= np.sum(fexp)
+        print(freqs)
+        print(fexp)
+        # test against uniform distribution
+        print(f'weakness={weak_weight}, freqs mse: {np.sum((freqs - fexp) ** 2)}')
+        # FIXME: pval is nan
+        # test_result = chisquare(f_obs=freqs, f_exp=fexp, ddof=1)
+        # print(f'weakness={weak_weight}, p-val {test_result.pvalue}')
+        # assert test_result.pvalue >= 0.95, (f"chisq test not passed: evidence that distribution is not uniform")

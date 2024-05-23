@@ -62,6 +62,23 @@ def random_uniform_graph(n_nodes, log_probs=False) -> nx.DiGraph:
     return graph
 
 
+def random_weakly_connected_graph(n_nodes, log_probs=False, weak_weight=1e-3) -> nx.DiGraph:
+    graph = nx.DiGraph()
+    weights = np.random.random((n_nodes, n_nodes))
+    component2 = [i for i in range(n_nodes) if i % 2 == 0]
+    # divide into two components
+    for i in range(n_nodes):
+        for j in range(n_nodes):
+            # set low weight for arcs between components
+            if (i in component2) ^ (j in component2):
+                weights[i, j] = weights[i, j] * weak_weight
+    np.fill_diagonal(weights, 0)
+    if log_probs:
+        weights = np.log(weights)
+    graph = reset_adj_matrix(graph, weights)
+    return graph
+
+
 def random_tree_skewed_graph(n_nodes, skewness, root: int | None = None) -> tuple[nx.DiGraph, nx.DiGraph]:
     """
     Generate an adjacency matrix by sampling 1 random spanning tree
@@ -161,8 +178,6 @@ def tuttes_tot_weight(graph: nx.DiGraph, root, weight='weight', contracted_arcs=
     # delete arcs
     for arc in deleted_arcs:
         A[arc[0], arc[1]] = 0
-        # re-normalize
-        A[:, arc[1]] = A[:, arc[1]] / A[:, arc[1]].sum()
     np.fill_diagonal(A, 0)
     Din = np.diag(np.sum(A, axis=0))
     L1 = Din - A
