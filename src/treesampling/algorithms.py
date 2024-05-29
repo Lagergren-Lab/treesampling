@@ -7,7 +7,7 @@ import csv
 from treesample.colbourn import ColbournSample
 
 from treesampling.utils.math import logsubexp, gumbel_max_trick_sample
-from treesampling.utils.graphs import tree_to_newick, graph_weight, tuttes_tot_weight
+from treesampling.utils.graphs import tree_to_newick, graph_weight, tuttes_tot_weight, reset_adj_matrix
 
 from treesampling.utils.graphs import random_uniform_graph, normalize_graph_weights
 
@@ -361,32 +361,38 @@ def _compute_wx_table_log(graph: nx.DiGraph, x_set: list) -> dict:
 def kirchoff_rst(graph: nx.DiGraph, root=0, log_probs: bool = False):
     if log_probs:
         raise ValueError("Kirchoff RST not implemented for log-probabilities")
+    # set root column to ones (it only matters it's not zero)
+    matrix = nx.to_numpy_array(graph)
+    matrix[:, root] = 1.
+    graph = reset_adj_matrix(graph, matrix)
     # normalize graph weights
     graph = normalize_graph_weights(graph, log_probs=log_probs)
 
     # initialize empty digraph
     tree = nx.DiGraph()
-    arc_candidates = sorted([e for e in graph.edges() if e[0] != e[1]], key=lambda x: graph.edges()[x]['weight'])
+    arc_candidates = sorted([e for e in graph.edges() if e[0] != e[1]], key=lambda x: graph.edges()[x]['weight'],
+                            reverse=True)
     aa = tuttes_tot_weight(graph, root)
     deleted_arcs = []
     while len(tree.edges()) < graph.number_of_nodes() - 1:
         # pick edge (sorted by weight so to increase acceptance ratio)
-        print(arc_candidates)
-        print(tree.edges())
+        # print(arc_candidates)
+        # print(tree.edges())
         arc = arc_candidates.pop(0)
         # sample uniform (0,1) and check if edge is added
         # sum of weights of trees including tree edges
         a = aa
         # sum of weights of trees including tree edges + e (a' in Kulkarni A8)
+        # Leverage score of arc
         aa = 1. if not tree.edges() else graph_weight(tree)
         aa *= graph.edges()[arc]['weight'] * tuttes_tot_weight(graph, root,
                                                                contracted_arcs=[e for e in tree.edges()] + [arc],
                                                                deleted_arcs=deleted_arcs)
         acceptance_ratio = aa / a
-        print(f"a: {a}, aa: {aa}")
-        print(f"acceptance ratio: {acceptance_ratio}")
+        # print(f"a: {a}, aa: {aa}")
+        # print(f"acceptance ratio: {acceptance_ratio}")
         if random.random() < acceptance_ratio:
-            print(f"adding edge {arc}")
+            # print(f"adding edge {arc}")
             tree.add_edge(*arc)
             tree.edges()[arc]['weight'] = graph.edges()[arc]['weight']
             # remove edges going in edge[1] from candidates or opposite
@@ -394,7 +400,7 @@ def kirchoff_rst(graph: nx.DiGraph, root=0, log_probs: bool = False):
                 if e[1] == arc[1] or e[::-1] == arc:
                     arc_candidates.remove(e)
         else:
-            print(f"excluding edge {arc}")
+            # print(f"excluding edge {arc}")
             # exclude edge from future consideration
             deleted_arcs.append(arc)
             # recompute aa

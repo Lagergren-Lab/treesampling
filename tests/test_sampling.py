@@ -6,7 +6,7 @@ from scipy.stats import chisquare
 
 from treesampling import algorithms
 import treesampling.utils.graphs as tg
-from treesampling.algorithms import random_spanning_tree_log
+from treesampling.algorithms import random_spanning_tree_log, kirchoff_rst
 
 
 def test_log_random_uniform_graph():
@@ -199,6 +199,31 @@ def test_wilson_rst():
         assert test_result.pvalue >= 0.95, (f"chisq test not passed: evidence that distribution is not uniform"
                                             f" [log_probs = {log_probs}]")
 
+def test_kirchoff_rst():
+    n_nodes = 6
+    adj_mat = np.ones((n_nodes, n_nodes))
+    np.fill_diagonal(adj_mat, 0)
+    # cardinality of tree topology
+    tot_trees = tg.cayleys_formula(n_nodes)
+
+    adj_mat = adj_mat
+    graph = nx.from_numpy_array(adj_mat, create_using=nx.DiGraph)
+    sample_size = 3 * tot_trees
+    sample_dict = {}
+    for s in range(sample_size):
+        tree = algorithms.kirchoff_rst(graph, root=0, log_probs=False)
+        assert nx.is_arborescence(tree)
+        tree_nwk = tg.tree_to_newick(tree)
+        if tree_nwk not in sample_dict:
+            sample_dict[tree_nwk] = 0
+        sample_dict[tree_nwk] = sample_dict[tree_nwk] + 1
+
+    unique_trees_obs = len(sample_dict)
+    freqs = np.pad(np.array([v for k, v in sample_dict.items()]) / sample_size,
+                   (0, tot_trees - unique_trees_obs))
+    # test against uniform distribution
+    test_result = chisquare(f_obs=freqs)
+    assert test_result.pvalue >= 0.95, (f"chisq test not passed: evidence that distribution is not uniform")
 
 def test_colbourn_rst():
     n_nodes = 7
@@ -257,3 +282,41 @@ def test_weakly_connection_colbourn():
         # test_result = chisquare(f_obs=freqs, f_exp=fexp, ddof=1)
         # print(f'weakness={weak_weight}, p-val {test_result.pvalue}')
         # assert test_result.pvalue >= 0.95, (f"chisq test not passed: evidence that distribution is not uniform")
+
+
+def test_kirchoff_no_loops():
+    """
+    Checks that leverage is 0 when mixing arc is deleted.
+    In this case, removing arc 0 -> 2 makes it impossible to go from 3 to 2
+    without creating loops. Indeed, the leverage of arc 3 -> 2 is 0 if arc 0 -> 2 is deleted.
+    """
+    # toy matrix
+    A = np.array([[0, 1, 0, 1],
+                  [0, 0, 1, 0],
+                  [0, 0, 0, 1],
+                  [0, 0, 1, 0]])
+    G = nx.from_numpy_array(A, create_using=nx.DiGraph)
+    G = tg.normalize_graph_weights(G)
+    print(nx.to_numpy_array(G))
+    # check resistance of arc 3 -> 2
+    leverage = tg.tuttes_tot_weight(G, 0, contracted_arcs=[(3, 2)], deleted_arcs=[(0, 3)])
+    resistance = G.edges()[3, 2]['weight'] * leverage / tg.tuttes_tot_weight(G, 0)
+    assert np.isclose(0, resistance)
+    # contract 0 -> 1 and check that 1/3 the total weight is in 1-2-3,
+    # another third is in 0->3->2 and the last third is in 0->3 and 1->2
+    w01 = G.edges()[0, 1]['weight']
+    tot_weight_c01 = w01 * tg.tuttes_tot_weight(G, 0, contracted_arcs=[(0, 1)])
+    tot_weight_c01_23 = G.edges()[2, 3]['weight'] * w01 * tg.tuttes_tot_weight(G, 0, contracted_arcs=[(0, 1), (2, 3)])
+    tot_weight_c01_32 = G.edges()[3, 2]['weight'] * w01 * tg.tuttes_tot_weight(G, 0, contracted_arcs=[(0, 1), (3, 2)])
+    tot_weight_c01_d23_d32 = w01 * tg.tuttes_tot_weight(G, 0, contracted_arcs=[(0, 1)], deleted_arcs=[(2, 3), (3, 2)])
+    print(f'total weight of trees with arc 0 -> 1: {tot_weight_c01}')
+    print(f'total weight of trees with arc 0 -> 1 and 2 -> 3: {tot_weight_c01_23}')
+    print(f'total weight of trees with arc 0 -> 1 and 3 -> 2: {tot_weight_c01_32}')
+    print(f'total weight of trees with arc 0 -> 1 without 3 -> 2 or 2 -> 3: {tot_weight_c01_d23_d32}')
+    assert np.isclose(tot_weight_c01, tot_weight_c01_23 + tot_weight_c01_32 + tot_weight_c01_d23_d32)
+
+    ss = 10
+    for s in range(ss):
+        tree = kirchoff_rst(G, 0)
+        assert nx.is_arborescence(tree)
+
