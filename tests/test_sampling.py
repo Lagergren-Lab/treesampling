@@ -151,25 +151,35 @@ def test_unbalanced_weights():
 
 
 def test_victree_output():
-    K = 12
     vic_out = h5py.File("/Users/zemp/phd/scilife/victree-experiments/SA501X3F/victree-out/K12/victree.out.h5ad",
                         'r')
     graph_matrix = vic_out['uns']['victree-tree-graph'][:]
+    K = graph_matrix.shape[0]
     graph = nx.complete_graph(K, create_using=nx.DiGraph)
     for u, v in itertools.product(range(K), repeat=2):
-        if v == 0 or u == v:
+        if u == v:
             graph_matrix[u, v] = -np.inf
     graph = tg.reset_adj_matrix(graph, graph_matrix)
+    graph = tg.normalize_graph_weights(graph, log_probs=True)
+    exp_weights = np.exp(nx.to_numpy_array(graph))
+    # NOTE: weights are clamped so to avoid instabilities
+    exp_weights = np.clip(exp_weights, a_min=1e-50, a_max=1.)
+    graph = tg.reset_adj_matrix(graph, exp_weights)
+    graph = tg.normalize_graph_weights(graph)
     ss = 100
     sample = {}
     for i in range(ss):
-        tree = castaway_rst(graph, root=0, log_probs=True, trick=True)
+        tree = castaway_rst(graph, root=0, log_probs=False, trick=True)
         tnwk = tg.tree_to_newick(tree)
         if tnwk not in sample:
             sample[tnwk] = 0
         sample[tnwk] += 1
+    print(sample)
     max_freq_tree_nwk = max(sample, key=sample.get)
-    assert max_freq_tree_nwk == '(((2,(10)6,7,8)1,(9)3,4,11)5)0'
+    for i in range(K):
+        graph.remove_edge(i, 0)
+    msa = tg.tree_to_newick(nx.maximum_spanning_arborescence(graph))
+    assert max_freq_tree_nwk == msa
 
 
 def test_wilson_rst():
