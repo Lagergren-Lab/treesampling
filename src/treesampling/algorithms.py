@@ -2,59 +2,33 @@ import time
 import random
 import networkx as nx
 import numpy as np
-import csv
 
 from treesample.colbourn import ColbournSample
 
 from treesampling.utils.math import logsubexp, gumbel_max_trick_sample
-from treesampling.utils.graphs import tree_to_newick, graph_weight, tuttes_tot_weight, reset_adj_matrix
+from treesampling.utils.graphs import graph_weight, tuttes_tot_weight, reset_adj_matrix
 
 from treesampling.utils.graphs import random_uniform_graph, normalize_graph_weights
 
 
-def wilson_rst(graph) -> nx.DiGraph:
-    # TODO: implement
-    stoch_graph = normalize_graph_weights(graph)
-    random_tree = nx.DiGraph()
-    return random_tree
+def castaway_rst(graph: nx.DiGraph, root=0, log_probs: bool = False, trick: bool = True) -> nx.DiGraph:
+    """
+    Wrapper for the original random spanning tree sampler inspired by Wilson algorithm.
+    :param graph: nx.DiGraph, with weights on arcs
+    :param root: label of the root in the graph
+    :param log_probs: if the graph has log-weights
+    :param trick: if True, the algorithm runs in O(n^3) by efficiently updating the W table. Otherwise W
+        is computed from scratch every time a new arc is added to the tree
+    :return:
+    """
+
+    if log_probs:
+        return _castaway_rst_log(graph, root, trick)
+    else:
+        return _castaway_rst_plain(graph, root, trick)
 
 
-# IMPLEMENTATION IN NORMAL SCALE
-def _compute_lexit_table(i, x_list: list,  wx_table: dict, tree: nx.DiGraph, graph: nx.DiGraph) -> tuple[list, list]:
-    nodes = []  # tuples (node, source) - source can be 'x' or 't'
-    w_choice = []  # weights for random choice at each node
-
-    # probability of any u in V(T) U X to be the next connection to i
-    pattach = {}  # for each v in X, gives sum_{w in T} p(w, v)
-    for v in x_list:
-        p_treetou = 0
-        for w in tree.nodes():
-            p_treetou = p_treetou + graph.edges()[w, v]['weight']
-        pattach[v] = p_treetou
-
-    for u in tree.nodes():
-        nodes.append((u, 't'))
-        w_choice.append(graph.edges()[u, i]['weight'])
-    for u in x_list:
-        p_treetou = 0
-        for v in x_list:
-            p_treetou = p_treetou + pattach[v] * wx_table[v, u]
-        nodes.append((u, 'x'))
-        w_choice.append(p_treetou * graph.edges()[u, i]['weight'])
-
-    return nodes, w_choice  # (u, origin) list and choice weights list
-
-
-def _update_wx(wy_table, u) -> dict:
-    # speed up trick
-    wx_table = {}
-    for (v, w) in wy_table.keys():
-        if v != u and w != u:
-            wx_table[v, w] = wy_table[v, w] - wy_table[v, u] * wy_table[u, w] / wy_table[u, u]
-    return wx_table
-
-
-def random_spanning_tree(in_graph: nx.DiGraph, root, trick=True) -> nx.DiGraph:
+def _castaway_rst_plain(in_graph: nx.DiGraph, root, trick=True) -> nx.DiGraph:
     """
     Sample one tree from a given graph with fast arborescence sampling algorithm.
     :param in_graph: must have log-scale weights
@@ -130,6 +104,40 @@ def random_spanning_tree(in_graph: nx.DiGraph, root, trick=True) -> nx.DiGraph:
     return tree
 
 
+def _compute_lexit_table(i, x_list: list,  wx_table: dict, tree: nx.DiGraph, graph: nx.DiGraph) -> tuple[list, list]:
+    nodes = []  # tuples (node, source) - source can be 'x' or 't'
+    w_choice = []  # weights for random choice at each node
+
+    # probability of any u in V(T) U X to be the next connection to i
+    pattach = {}  # for each v in X, gives sum_{w in T} p(w, v)
+    for v in x_list:
+        p_treetou = 0
+        for w in tree.nodes():
+            p_treetou = p_treetou + graph.edges()[w, v]['weight']
+        pattach[v] = p_treetou
+
+    for u in tree.nodes():
+        nodes.append((u, 't'))
+        w_choice.append(graph.edges()[u, i]['weight'])
+    for u in x_list:
+        p_treetou = 0
+        for v in x_list:
+            p_treetou = p_treetou + pattach[v] * wx_table[v, u]
+        nodes.append((u, 'x'))
+        w_choice.append(p_treetou * graph.edges()[u, i]['weight'])
+
+    return nodes, w_choice  # (u, origin) list and choice weights list
+
+
+def _update_wx(wy_table, u) -> dict:
+    # speed up trick
+    wx_table = {}
+    for (v, w) in wy_table.keys():
+        if v != u and w != u:
+            wx_table[v, w] = wy_table[v, w] - wy_table[v, u] * wy_table[u, w] / wy_table[u, u]
+    return wx_table
+
+
 def _compute_wx_table(graph: nx.DiGraph, x_set: list) -> dict:
     # print(f"w(G): {nx.to_numpy_array(graph)}")
     # print(f"x_set: {list(graph.nodes())}")
@@ -177,50 +185,8 @@ def _compute_wx_table(graph: nx.DiGraph, x_set: list) -> dict:
 
     return wx
 
-# IMPLEMENTATION IN LOG SCALE
-def _compute_lexit_table_log(i, x_list: list,  wx_table: dict, tree: nx.DiGraph, graph: nx.DiGraph) -> tuple[list, list]:
-    nodes = []  # tuples (node, source) - source can be 'x' or 't'
-    w_choice = []  # weights for random choice at each node
 
-    # probability of any u in V(T) U X to be the next connection to i
-    pattach = {}  # for each v in X, gives sum_{w in T} p(w, v)
-    for v in x_list:
-        p_treetou = - np.infty
-        for w in tree.nodes():
-            p_treetou = np.logaddexp(p_treetou, graph.edges()[w, v]['weight'])
-        pattach[v] = p_treetou
-
-    for u in tree.nodes():
-        nodes.append((u, 't'))
-        w_choice.append(graph.edges()[u, i]['weight'])
-    for u in x_list:
-        p_treetou = - np.infty
-        for v in x_list:
-            p_treetou = np.logaddexp(p_treetou, pattach[v] + wx_table[v, u])
-        nodes.append((u, 'x'))
-        w_choice.append(p_treetou + graph.edges()[u, i]['weight'])
-
-    return nodes, w_choice  # (u, origin) list and choice weights list
-
-
-def _update_wx_log(wy_table, u) -> dict:
-    # speed up trick
-    wx_table = {}
-    if wy_table[u, u] == - np.inf:
-        wx_table = wy_table
-    else:
-        for (v, w) in wy_table.keys():
-            if v != u and w != u:
-                if wy_table[v, w] == - np.inf:
-                    # wx can't be any less than that (avoids logsubexp(-inf, a) where -np.inf < a << 0 )
-                    a = - np.inf
-                else:
-                    a = logsubexp(wy_table[v, w], wy_table[v, u] + wy_table[u, w] - wy_table[u, u])
-                wx_table[v, w] = a
-    return wx_table
-
-
-def random_spanning_tree_log(in_graph: nx.DiGraph, root, trick=True) -> nx.DiGraph:
+def _castaway_rst_log(in_graph: nx.DiGraph, root, trick=True) -> nx.DiGraph:
     """
     Sample one tree from a given graph with fast arborescence sampling algorithm.
     :param in_graph: must have log-scale weights
@@ -303,6 +269,48 @@ def random_spanning_tree_log(in_graph: nx.DiGraph, root, trick=True) -> nx.DiGra
     return tree
 
 
+def _compute_lexit_table_log(i, x_list: list,  wx_table: dict, tree: nx.DiGraph, graph: nx.DiGraph) -> tuple[list, list]:
+    nodes = []  # tuples (node, source) - source can be 'x' or 't'
+    w_choice = []  # weights for random choice at each node
+
+    # probability of any u in V(T) U X to be the next connection to i
+    pattach = {}  # for each v in X, gives sum_{w in T} p(w, v)
+    for v in x_list:
+        p_treetou = - np.infty
+        for w in tree.nodes():
+            p_treetou = np.logaddexp(p_treetou, graph.edges()[w, v]['weight'])
+        pattach[v] = p_treetou
+
+    for u in tree.nodes():
+        nodes.append((u, 't'))
+        w_choice.append(graph.edges()[u, i]['weight'])
+    for u in x_list:
+        p_treetou = - np.infty
+        for v in x_list:
+            p_treetou = np.logaddexp(p_treetou, pattach[v] + wx_table[v, u])
+        nodes.append((u, 'x'))
+        w_choice.append(p_treetou + graph.edges()[u, i]['weight'])
+
+    return nodes, w_choice  # (u, origin) list and choice weights list
+
+
+def _update_wx_log(wy_table, u) -> dict:
+    # speed up trick
+    wx_table = {}
+    if wy_table[u, u] == - np.inf:
+        wx_table = wy_table
+    else:
+        for (v, w) in wy_table.keys():
+            if v != u and w != u:
+                if wy_table[v, w] == - np.inf:
+                    # wx can't be any less than that (avoids logsubexp(-inf, a) where -np.inf < a << 0 )
+                    a = - np.inf
+                else:
+                    a = logsubexp(wy_table[v, w], wy_table[v, u] + wy_table[u, w] - wy_table[u, u])
+                wx_table[v, w] = a
+    return wx_table
+
+
 def _compute_wx_table_log(graph: nx.DiGraph, x_set: list) -> dict:
     # print(f"w(G): {nx.to_numpy_array(graph)}")
     # print(f"x_set: {list(graph.nodes())}")
@@ -358,9 +366,12 @@ def _compute_wx_table_log(graph: nx.DiGraph, x_set: list) -> dict:
     return wx
 
 
-def kirchoff_rst(graph: nx.DiGraph, root=0, log_probs: bool = False):
+def kirchoff_rst(graph: nx.DiGraph, root=0, log_probs: bool = False) -> nx.DiGraph:
+    """
+    Implementation of Kulkarni A8 algorithm for directed graphs.
+    """
     if log_probs:
-        raise ValueError("Kirchoff RST not implemented for log-probabilities")
+        raise ValueError("Kulkarni RST not implemented for log-probabilities")
     # set root column to ones (it only matters it's not zero)
     matrix = nx.to_numpy_array(graph)
     matrix[:, root] = 1.
@@ -411,7 +422,7 @@ def kirchoff_rst(graph: nx.DiGraph, root=0, log_probs: bool = False):
     return tree
 
 
-def wilson_rst(graph: nx.DiGraph, root=0, log_probs: bool = False):
+def wilson_rst(graph: nx.DiGraph, root=0, log_probs: bool = False) -> nx.DiGraph:
     n_nodes = graph.number_of_nodes()
     # normalize graph
     norm_graph = normalize_graph_weights(graph, log_probs=log_probs)
@@ -441,13 +452,6 @@ def wilson_rst(graph: nx.DiGraph, root=0, log_probs: bool = False):
     return tree
 
 
-def nxtree_from_tuple(tree_tuple: tuple):
-    nx_tree = nx.DiGraph()
-    for i, j in zip(tree_tuple[1:], np.arange(1, len(tree_tuple))):
-        nx_tree.add_edge(i, j)
-    return nx_tree
-
-
 def colbourn_rst(graph: nx.DiGraph, root=0, log_probs: bool = False):
     if root != 0:
         raise ValueError("Root different than 0 not implemented, please remap graph nodes accordingly")
@@ -458,10 +462,17 @@ def colbourn_rst(graph: nx.DiGraph, root=0, log_probs: bool = False):
     W = nx.to_numpy_array(graph)
     colbourn = ColbournSample(W)
     tree_tuple, p = colbourn._sample()
-    tree = nxtree_from_tuple(tree_tuple)
+    tree = _nxtree_from_tuple(tree_tuple)
     for e in tree.edges():
         tree.edges()[e]['weight'] = graph.edges()[e]['weight']
     return tree
+
+
+def _nxtree_from_tuple(tree_tuple: tuple):
+    nx_tree = nx.DiGraph()
+    for i, j in zip(tree_tuple[1:], np.arange(1, len(tree_tuple))):
+        nx_tree.add_edge(i, j)
+    return nx_tree
 
 
 if __name__ == '__main__':
@@ -474,7 +485,7 @@ if __name__ == '__main__':
         # our vs wilson: uniform graph
         start = time.time()
         for s in range(sample_size):
-            tree = random_spanning_tree(graph, 0)
+            tree = castaway_rst(graph, 0)
         print(f"our time ss = {sample_size}, k = {n_nodes}: {time.time() - start}")
         start = time.time()
         for s in range(sample_size):
@@ -505,7 +516,7 @@ if __name__ == '__main__':
     # our vs wilson: uniform graph
     start = time.time()
     for s in range(sample_size):
-        tree = random_spanning_tree(graph, 0)
+        tree = castaway_rst(graph, 0)
     print(f"our time ss = {sample_size}, k = {n_nodes}: {time.time() - start}")
     start = time.time()
     for s in range(sample_size):

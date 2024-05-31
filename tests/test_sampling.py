@@ -6,7 +6,7 @@ from scipy.stats import chisquare
 
 from treesampling import algorithms
 import treesampling.utils.graphs as tg
-from treesampling.algorithms import random_spanning_tree_log, kirchoff_rst
+from treesampling.algorithms import castaway_rst, kirchoff_rst
 
 
 def test_log_random_uniform_graph():
@@ -37,7 +37,7 @@ def test_random_k_trees_graph():
     acc = 0
     num = 0
     for i in range(sample_size):
-        tree = algorithms.random_spanning_tree_log(log_graph, root=root)
+        tree = algorithms.castaway_rst(log_graph, root=root, log_probs=True)
         tree_nwk = tg.tree_to_newick(tree)
         if tree_nwk not in sample:
             weight = np.exp(tg.graph_weight(tree, log_probs=True))
@@ -49,7 +49,7 @@ def test_random_k_trees_graph():
     residual = 1 - acc / tot_weight
     unseen_freq = 0
     for i in range(extra_sample):
-        tree = algorithms.random_spanning_tree_log(log_graph, root=root)
+        tree = algorithms.castaway_rst(log_graph, root=root, log_probs=True)
         if tg.tree_to_newick(tree) not in sample:
             unseen_freq += 1
 
@@ -112,7 +112,7 @@ def test_uniform_graph_sampling():
     sample_size = 3 * tot_trees
     sample_dict = {}
     for s in range(sample_size):
-        tree = algorithms.random_spanning_tree(graph, root=0)
+        tree = algorithms.castaway_rst(graph, root=0)
         tree_nwk = tg.tree_to_newick(tree)
         if tree_nwk not in sample_dict:
             sample_dict[tree_nwk] = 0
@@ -145,7 +145,7 @@ def test_unbalanced_weights():
 
     graph = nx.complete_graph(n_nodes, create_using=nx.DiGraph)
     graph = tg.reset_adj_matrix(graph, adj_matrix)
-    tree = algorithms.random_spanning_tree_log(graph, root, trick=True)
+    tree = algorithms.castaway_rst(graph, root, log_probs=True, trick=True)
     exp_graph = tg.reset_adj_matrix(graph, np.exp(adj_matrix))
     assert tg.tree_to_newick(tree) == tg.tree_to_newick(nx.maximum_spanning_arborescence(exp_graph))
 
@@ -163,7 +163,7 @@ def test_victree_output():
     ss = 100
     sample = {}
     for i in range(ss):
-        tree = random_spanning_tree_log(graph, root=0, trick=True)
+        tree = castaway_rst(graph, root=0, log_probs=True, trick=True)
         tnwk = tg.tree_to_newick(tree)
         if tnwk not in sample:
             sample[tnwk] = 0

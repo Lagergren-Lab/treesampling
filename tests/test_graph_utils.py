@@ -4,7 +4,7 @@ from statsmodels.stats.proportion import proportions_ztest
 
 import treesampling.algorithms as ta
 from treesampling.utils.graphs import enumerate_rooted_trees, cayleys_formula, kirchhoff_tot_weight, \
-    normalize_graph_weights, tree_to_newick, reset_adj_matrix, tuttes_tot_weight, graph_weight, adjoint
+    normalize_graph_weights, tree_to_newick, reset_adj_matrix, tuttes_tot_weight, adjoint
 from treesampling.utils.math import generate_random_matrix
 
 
@@ -16,10 +16,12 @@ def test_enumerate_rooted_trees():
 
 
 def test_edge_contraction():
-    n_nodes = 10
+    np.random.seed(0)
+    n_nodes = 8
     # generate random adjacency matrix
     graph = nx.complete_graph(n_nodes, create_using=nx.DiGraph)
     weights = np.random.random((n_nodes, n_nodes))
+    np.fill_diagonal(weights, 0.)
     graph = reset_adj_matrix(graph, weights)
     graph = normalize_graph_weights(graph)
     e = (1, 2)
@@ -30,31 +32,30 @@ def test_edge_contraction():
     tot_contracted_weight = tuttes_tot_weight(graph, root=0, contracted_arcs=[e])
     tot_deleted_weight = tuttes_tot_weight(graph, root=0, deleted_arcs=[e])
     # compare tot weight and sum of contracted and deleted weight
-    print(tot_weight, tot_contracted_weight * e_weight + tot_deleted_weight * (1 - e_weight))
-    tuttes_proportion = tuttes_tot_weight(graph, root=0, contracted_arcs=[e]) * e_weight / tot_weight
+    assert np.isclose(tot_weight, tot_contracted_weight * e_weight + tot_deleted_weight)
+    tuttes_proportion = tot_contracted_weight * e_weight / tot_weight
 
     # now sample many trees and check the proportion of trees which contain that edge
     sample_size = 5000
     tree_proportion_with_e = 0
     for s in range(sample_size):
-        tree = ta.random_spanning_tree(graph, root=0)
+        tree = ta.castaway_rst(graph, root=0)
         if e in tree.edges:
             tree_proportion_with_e += 1
     tree_proportion_with_e /= sample_size
-    # FIXME: these 2 values should be closer than they are
     # print the two proportions with annotations
     print(f"the following should be as equal as possible (sample size {sample_size})")
     print(f"empirical proportion of trees with edge e {e}: {tree_proportion_with_e}")
     print(f"proportion of weight of trees with edge e {e} (tuttes): {tuttes_proportion}")
 
     # prop test to verify whether the difference is statistically significant
-    stat, pval = proportions_ztest(tree_proportion_with_e * sample_size, sample_size, value=tuttes_proportion)
+    stat, pval = proportions_ztest(tree_proportion_with_e, sample_size, value=tuttes_proportion)
+    # assert pval > 0.95
     print(f"pval: {pval}")
 
     # test with adjoint
     # compute the kirchhoff matrix
     # FIXME: why the adjoint method is not working?
-    np.fill_diagonal(weights, 0)
     Din = np.diag(np.sum(weights, axis=0))
     K = Din - weights
     adjoint_K = adjoint(K)
@@ -104,7 +105,7 @@ def test_kirchhoff_tot_weight():
     ss = 1000
     sample = {}
     for s in range(ss):
-        tree = ta.random_spanning_tree(graph, root=0)
+        tree = ta.castaway_rst(graph, root=0)
         tree_nwk = tree_to_newick(tree)
         if tree_nwk not in sample:
             sample[tree_nwk] = 1
