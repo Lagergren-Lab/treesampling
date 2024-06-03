@@ -7,6 +7,17 @@ from treesampling.utils.math import logsubexp, gumbel_max_trick_sample
 from treesampling.utils.graphs import graph_weight, tuttes_tot_weight, reset_adj_matrix, mat_minor
 
 from treesampling.utils.graphs import random_uniform_graph, normalize_graph_weights
+from warnings import warn
+
+
+def random_spanning_tree(graph: nx.DiGraph, root=0) -> nx.DiGraph:
+    warn('Use the new function ' + castaway_rst.__name__ + ' with log_probs=False', DeprecationWarning, stacklevel=2)
+    return castaway_rst(graph, root, log_probs=False)
+
+
+def random_spanning_tree_log(graph: nx.DiGraph, root=0) -> nx.DiGraph:
+    warn('Use the new function ' + castaway_rst.__name__ + ' with log_probs=True', DeprecationWarning, stacklevel=2)
+    return castaway_rst(graph, root, log_probs=True)
 
 
 def castaway_rst(graph: nx.DiGraph, root=0, log_probs: bool = False, trick: bool = True) -> nx.DiGraph:
