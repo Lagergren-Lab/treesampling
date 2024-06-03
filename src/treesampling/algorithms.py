@@ -3,10 +3,8 @@ import random
 import networkx as nx
 import numpy as np
 
-from treesample.colbourn import ColbournSample
-
 from treesampling.utils.math import logsubexp, gumbel_max_trick_sample
-from treesampling.utils.graphs import graph_weight, tuttes_tot_weight, reset_adj_matrix
+from treesampling.utils.graphs import graph_weight, tuttes_tot_weight, reset_adj_matrix, mat_minor
 
 from treesampling.utils.graphs import random_uniform_graph, normalize_graph_weights
 
@@ -453,30 +451,117 @@ def wilson_rst(graph: nx.DiGraph, root=0, log_probs: bool = False) -> nx.DiGraph
 
 
 def colbourn_rst(graph: nx.DiGraph, root=0, log_probs: bool = False):
-    if root != 0:
-        raise ValueError("Root different than 0 not implemented, please remap graph nodes accordingly")
+    """
+    Re-adapted from rycolab/treesample implementation
+    :param graph:
+    :param root:
+    :param log_probs:
+    :return:
+    """
     if log_probs:
         raise ValueError("Colbourne RST not implemented for log-probabilities")
     # normalize graph weights
     graph = normalize_graph_weights(graph, log_probs=log_probs)
     W = nx.to_numpy_array(graph)
-    colbourn = ColbournSample(W)
-    tree_tuple, p = colbourn._sample()
-    tree = _nxtree_from_tuple(tree_tuple)
+    nodes_perm = [i for i in range(W.shape[1])]
+    if root != 0:
+        nodes_perm = [root] + [i for i in range(W.shape[1]) if i != root]
+        W = W[:, nodes_perm]
+    tree = _colbourn_tree_from_matrix(W)
+
+    tree = nx.relabel_nodes(tree, {i: nodes_perm[i] for i in range(W.shape[1])})
     for e in tree.edges():
         tree.edges()[e]['weight'] = graph.edges()[e]['weight']
     return tree
 
 
-def _nxtree_from_tuple(tree_tuple: tuple):
-    nx_tree = nx.DiGraph()
-    for i, j in zip(tree_tuple[1:], np.arange(1, len(tree_tuple))):
-        nx_tree.add_edge(i, j)
-    return nx_tree
+def _sample_edge(j, B, A, r) -> tuple[int, float]:
+
+    # compute the marginals
+    n = A.shape[0]
+    marginals = np.zeros(n)
+    for i in range(n):
+        if i == j:
+            marginals[i] = B[0, i] * r[i]
+        else:
+            if j != 0:
+                marginals[i] += B[j, j] * A[i, j]
+            if i != 0:
+                marginals[i] -= B[i, j] * A[i, j]
+    # correct very small numbers to 0 due to float precision leading to
+    # subtractions a - a != 0
+    marginals[marginals < 1e-50] = 0
+    # re-normalize
+    marginals /= np.sum(marginals)
+    out = np.random.choice(np.arange(n), p=marginals)
+    return out, float(marginals[out])
+
+
+def _update_BL(i, j, B, L, A, r) -> tuple[np.ndarray, np.ndarray]:
+    # code is copied from rycolab/treesample/colbourn.py - credits to
+    # condition the laplacian so that i -> j is in any tree
+    # K is the laplacian
+    n = B.shape[0]
+    uj = np.zeros(n)
+    if i == j:
+        uj[0] = r[j]
+    else:
+        if j != 0:
+            uj[j] = A[i, j]
+        if i != 0:
+            uj[i] = -A[i, j]
+    # update B and L
+    u = uj - L[:, j]
+    L[:, j] = uj
+    bj = B[:, j]
+    ub = u.T @ bj
+    s = 1 + ub
+    B -= np.outer(bj, u.T @ B) / s
+    return B, L
+
+
+def _colbourn_tree_from_matrix(W: np.ndarray) -> nx.DiGraph:
+    """
+    Assumes root is 0. Wrapper can permute nodes so to arbitrarily set the root. See main function colbourn_rst
+    :param W: weight matrix
+    :return: nx.DiGraph with tree edges only (is_arborescence = True)
+    """
+    # nodes
+    n = W.shape[0] - 1
+    r = W[0, 1:]
+    A = W[1:, 1:]
+    np.fill_diagonal(A, 0)
+    # Kirchoff matrix
+    L = _koo_laplacian(A, r)
+    B = np.linalg.inv(L).transpose()
+    tree = nx.DiGraph()
+
+    for j in range(n):
+        i, p_i = _sample_edge(j=j, B=B, A=A, r=r)
+        if i == j:
+            # i is root
+            tree.add_edge(0, j + 1)
+        else:
+            tree.add_edge(i + 1, j + 1)
+        B, L = _update_BL(i, j, B, L, A, r)
+
+    assert nx.is_arborescence(tree)
+    return tree
+
+
+def _koo_laplacian(A, r):
+    """
+    Root-weighted Laplacian of Koo et al. (2007)
+    A is the adjacency matrix and r is the root weight
+    """
+    L = -A + np.diag(np.sum(A, 0))
+    L[0] = r
+    return L
 
 
 if __name__ == '__main__':
     # repeat for different number of nodes
+    root = 1
     for n_nodes in [8, 9, 10]:
         trees_sample = {}
         graph = random_uniform_graph(n_nodes)
@@ -485,15 +570,15 @@ if __name__ == '__main__':
         # our vs wilson: uniform graph
         start = time.time()
         for s in range(sample_size):
-            tree = castaway_rst(graph, 0)
+            tree = castaway_rst(graph, root)
         print(f"our time ss = {sample_size}, k = {n_nodes}: {time.time() - start}")
         start = time.time()
         for s in range(sample_size):
-            tree = wilson_rst(graph, 0)
+            tree = wilson_rst(graph, root)
         print(f"wilson time ss = {sample_size}, k = {n_nodes}: {time.time() - start}")
         start = time.time()
         for s in range(sample_size):
-            tree = colbourn_rst(graph, 0)
+            tree = colbourn_rst(graph, root)
         print(f"colbourn time ss = {sample_size}, k = {n_nodes}: {time.time() - start}")
         # print(tree_to_newick(tree))
 

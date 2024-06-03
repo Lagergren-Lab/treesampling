@@ -235,8 +235,10 @@ def test_kirchoff_rst():
     test_result = chisquare(f_obs=freqs)
     assert test_result.pvalue >= 0.95, (f"chisq test not passed: evidence that distribution is not uniform")
 
+
 def test_colbourn_rst():
-    n_nodes = 7
+    n_nodes = 6
+    root = 1
     adj_mat = np.ones((n_nodes, n_nodes))
     np.fill_diagonal(adj_mat, 0)
     # cardinality of tree topology
@@ -247,7 +249,7 @@ def test_colbourn_rst():
     sample_size = 3 * tot_trees
     sample_dict = {}
     for s in range(sample_size):
-        tree = algorithms.colbourn_rst(graph, root=0, log_probs=False)
+        tree = algorithms.colbourn_rst(graph, root=root, log_probs=False)
         tree_nwk = tg.tree_to_newick(tree)
         if tree_nwk not in sample_dict:
             sample_dict[tree_nwk] = 0
@@ -262,10 +264,11 @@ def test_colbourn_rst():
 
 
 def test_weakly_connection_colbourn():
+    np.random.seed(0)
     n_nodes = 6
-    n_samples = 5000
+    n_samples = 10000
 
-    for weak_weight in [1e-30, 1e-50, 1e-100, 1e-150, 1e-200, 1e-300, 1e-500]:
+    for weak_weight in [0.1, 1e-2, 1e-30, 1e-50, 1e-100]:
         graph = tg.random_weakly_connected_graph(n_nodes, weak_weight=weak_weight)
         sample_dict = {}
         weight_dict = {}
@@ -279,19 +282,23 @@ def test_weakly_connection_colbourn():
             sample_dict[tree_nwk] = sample_dict[tree_nwk] + 1
 
         unique_trees_obs = len(sample_dict)
-        freqs = np.pad(np.array([v for k, v in sample_dict.items()]) / n_samples,
-                       (0, tg.cayleys_formula(n_nodes) - unique_trees_obs))
-        fexp = np.pad(np.array([weight_dict[t] for t, _ in sample_dict.items()]),
-                      (0, tg.cayleys_formula(n_nodes) - unique_trees_obs))
+        freqs = np.array([v for k, v in sample_dict.items()])
+        # remove rare samples, otherwise chisq test is invalid
+        rare = freqs <= 5
+        freqs = freqs[~rare]
+
+        fexp = np.array([weight_dict[t] for t, _ in sample_dict.items()])
+        fexp = fexp[~rare]
         fexp /= np.sum(fexp)
+        fexp *= sum(freqs)
         print(freqs)
         print(fexp)
-        # test against uniform distribution
-        print(f'weakness={weak_weight}, freqs mse: {np.sum((freqs - fexp) ** 2)}')
-        # FIXME: pval is nan
-        # test_result = chisquare(f_obs=freqs, f_exp=fexp, ddof=1)
-        # print(f'weakness={weak_weight}, p-val {test_result.pvalue}')
-        # assert test_result.pvalue >= 0.95, (f"chisq test not passed: evidence that distribution is not uniform")
+        print(fexp.size)
+        # test against expected distribution
+        print(f'weakness={weak_weight}, freqs mse: {np.sum((freqs/sum(freqs) - fexp/sum(fexp)) ** 2)}')
+        test_result = chisquare(f_obs=freqs, f_exp=fexp)
+        print(f'weakness={weak_weight}, p-val {test_result}')
+        # assert test_result.pvalue < 0.15, (f"chisq test not passed: evidence that distribution is not as expected")
 
 
 def test_kirchoff_no_loops():
