@@ -178,13 +178,22 @@ def tuttes_tot_weight(graph: nx.DiGraph, root, weight='weight', contracted_arcs=
     # delete arcs
     for arc in deleted_arcs:
         A[arc[0], arc[1]] = 0
-    np.fill_diagonal(A, 0)
-    Din = np.diag(np.sum(A, axis=0))
-    L1 = Din - A
+    L1 = kirchoff_matrix(A)
     # L1 is also known as Kirchoff matrix (as in Colbourn 1996)
     L1r = mat_minor(L1, row=root, col=root)
 
     return np.linalg.det(L1r)
+
+
+def kirchoff_matrix(A):
+    """
+    Kirchoff matrix of a graph
+    :param A: adjacency matrix
+    :return: Kirchoff matrix
+    """
+    np.fill_diagonal(A, 0)
+    Din = np.diag(np.sum(A, axis=0))
+    return Din - A
 
 
 def kirchhoff_tot_weight(graph, minor_row=0, minor_col=0):

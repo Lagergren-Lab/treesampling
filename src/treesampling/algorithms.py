@@ -1,10 +1,10 @@
 import time
-import random
+import logging
 import networkx as nx
 import numpy as np
 
 from treesampling.utils.math import logsubexp, gumbel_max_trick_sample
-from treesampling.utils.graphs import graph_weight, tuttes_tot_weight, reset_adj_matrix, mat_minor
+from treesampling.utils.graphs import graph_weight, tuttes_tot_weight, reset_adj_matrix
 
 from treesampling.utils.graphs import random_uniform_graph, normalize_graph_weights
 from warnings import warn
@@ -46,7 +46,7 @@ def _castaway_rst_plain(in_graph: nx.DiGraph, root, trick=True) -> nx.DiGraph:
     :return: nx.DiGraph with tree edges only
     """
     # normalize out arcs (cols)
-    # print("BEGIN ALGORITHM")
+    logging.debug("\n[[[ BEGIN ALGORITHM ]]]\n")
     graph = normalize_graph_weights(in_graph, rowwise=False, log_probs=False)
 
     # algorithm variables
@@ -59,6 +59,7 @@ def _castaway_rst_plain(in_graph: nx.DiGraph, root, trick=True) -> nx.DiGraph:
     wx_table = _compute_wx_table(graph, x_list)
     # iterate for each node
     while len(x_list) > 1:
+        logging.debug(f"\n[[[ CASTAWAY IT {graph.number_of_nodes() - len(x_list)}]]]\n")
         # print(f"+ TREE: {tree_to_newick(tree)}")
         # print(f"\tX set: {x_list}")
         # print(f"\tdangling path: {dangling_path}")
@@ -79,11 +80,12 @@ def _castaway_rst_plain(in_graph: nx.DiGraph, root, trick=True) -> nx.DiGraph:
             wx_table = _update_wx(wx_table, i_vertex)
         else:
             wx_table = _compute_wx_table(graph, x_list)
+        assert not np.any([np.isnan(wx_table[k]) for k in wx_table]), f"NaN values in wx table: {wx_table} at node {i_vertex}"
         nodes_lab, w_choice = _compute_lexit_table(i_vertex, x_list, wx_table, tree, graph)
 
         # pick next node
-        rnd_idx = random.choices(list(range(len(w_choice))), w_choice, k=1)
-        u_vertex, origin_lab = nodes_lab[rnd_idx[0]]
+        rnd_idx = np.random.choice(np.arange(len(w_choice)), size=1, p=w_choice)[0]
+        u_vertex, origin_lab = nodes_lab[rnd_idx]
         dangling_path.append((u_vertex, i_vertex, graph.edges()[u_vertex, i_vertex]['weight']))
         if origin_lab == 't':
             # if u picked from tree, attach dangling path and reset
@@ -96,9 +98,10 @@ def _castaway_rst_plain(in_graph: nx.DiGraph, root, trick=True) -> nx.DiGraph:
     assert len(x_list) == 1
     i_vertex = x_list[0]
     tree_nodes = list(tree.nodes())
-    rnd_idx = random.choices(list(range(len(tree_nodes))), [graph.edges()[u, i_vertex]['weight'] for u in tree_nodes],
-                             k=1)
-    u_vertex = tree_nodes[rnd_idx[0]]
+    pchoice = np.array([graph.edges()[u, i_vertex]['weight'] for u in tree_nodes])
+    rnd_idx = np.random.choice(np.arange(len(tree_nodes)), p=pchoice / np.sum(pchoice),
+                               size=1)[0]
+    u_vertex = tree_nodes[rnd_idx]
 
     if dangling_path:
         dangling_path.append((u_vertex, i_vertex, graph.edges()[u_vertex, i_vertex]['weight']))
@@ -113,7 +116,8 @@ def _castaway_rst_plain(in_graph: nx.DiGraph, root, trick=True) -> nx.DiGraph:
     return tree
 
 
-def _compute_lexit_table(i, x_list: list,  wx_table: dict, tree: nx.DiGraph, graph: nx.DiGraph) -> tuple[list, list]:
+def _compute_lexit_table(i, x_list: list,  wx_table: dict,
+                         tree: nx.DiGraph, graph: nx.DiGraph) -> tuple[list, np.ndarray]:
     nodes = []  # tuples (node, source) - source can be 'x' or 't'
     w_choice = []  # weights for random choice at each node
 
@@ -134,38 +138,44 @@ def _compute_lexit_table(i, x_list: list,  wx_table: dict, tree: nx.DiGraph, gra
             p_treetou = p_treetou + pattach[v] * wx_table[v, u]
         nodes.append((u, 'x'))
         w_choice.append(p_treetou * graph.edges()[u, i]['weight'])
+    w_choice = np.array(w_choice) / np.sum(w_choice)
 
     return nodes, w_choice  # (u, origin) list and choice weights list
 
 
 def _update_wx(wy_table, u) -> dict:
     # speed up trick
+    logging.debug(f"\n--- UPDATE WX node: {u} ---\n")
     wx_table = {}
     for (v, w) in wy_table.keys():
         if v != u and w != u:
             wx_table[v, w] = wy_table[v, w] - wy_table[v, u] * wy_table[u, w] / wy_table[u, u]
+    logging.debug(f"wx_table: {wx_table}")
     return wx_table
 
 
 def _compute_wx_table(graph: nx.DiGraph, x_set: list) -> dict:
-    # print(f"w(G): {nx.to_numpy_array(graph)}")
-    # print(f"x_set: {list(graph.nodes())}")
+    logging.debug(f"w(G): {nx.to_numpy_array(graph)}")
+    logging.debug(f"x_set: {list(graph.nodes())}")
     # base step: x_set = [v] (one node)
     v = x_set[0]
     wx = {(v, v): 1}
 
     for i in range(1, len(x_set)):
-        # print(f"current wx: {wx}")
+        logging.debug(f"\n-------- COMPUTE WX IT: {i} -----------\n")
+        logging.debug(f"current wx: {wx}")
         x = x_set[:i]
-        # print(f"x: {x}")
+        logging.debug(f"x: {x}")
         u = x_set[i]
-        # print(f"new vertex u: {u}")
+        logging.debug(f"new vertex u: {u}")
         # Y = X U { Vi }
         wy = {}
         # compute Ry(u) where u is Y \ X (u)
         ry_1 = 0
         for (v, w) in wx.keys():
             ry_1 = ry_1 + graph.edges()[u, v]['weight'] * wx[v, w] * graph.edges()[w, u]['weight']
+            if ry_1 >= 1:
+                logging.debug(f"{(v, w)}: wx[v,w] = {wx[v, w]} makes ry_1 = {ry_1} be 1")
         ry = 1 / (1 - ry_1)
 
         # compute Wy
@@ -189,6 +199,8 @@ def _compute_wx_table(graph: nx.DiGraph, x_set: list) -> dict:
                 wy[v, w] = wx[v, w] + wxy[v] * ry * wyx[w]
         # new self returning random path
         wy[u, u] = ry
+
+        # normalize wy
 
         wx = wy
 
@@ -225,7 +237,7 @@ def _castaway_rst_log(in_graph: nx.DiGraph, root, trick=True) -> nx.DiGraph:
         # print(f"\tdangling path: {dangling_path}")
         # choose new i if no dangling nodes
         if not dangling_path:
-            i_vertex = random.choice(x_list)
+            i_vertex = np.random.choice(x_list, size=1)[0]
             x_list.remove(i_vertex)
         # or set last node
         else:
@@ -244,11 +256,6 @@ def _castaway_rst_log(in_graph: nx.DiGraph, root, trick=True) -> nx.DiGraph:
         # --- original
         rnd_idx = gumbel_max_trick_sample(w_choice)
 
-        # --- exponentiate version
-        # w_choice_p = ss.softmax(np.array(w_choice))
-        # rnd_idx = random.choices(list(range(len(w_choice))), w_choice_p, k=1)
-        # rnd_idx = rnd_idx[0]
-        # ---
         u_vertex, origin_lab = nodes_lab[rnd_idx]
         dangling_path.append((u_vertex, i_vertex, graph.edges()[u_vertex, i_vertex]['weight']))
         if origin_lab == 't':
@@ -411,7 +418,7 @@ def kirchoff_rst(graph: nx.DiGraph, root=0, log_probs: bool = False) -> nx.DiGra
         acceptance_ratio = aa / a
         # print(f"a: {a}, aa: {aa}")
         # print(f"acceptance ratio: {acceptance_ratio}")
-        if random.random() < acceptance_ratio:
+        if np.random.random() < acceptance_ratio:
             # print(f"adding edge {arc}")
             tree.add_edge(*arc)
             tree.edges()[arc]['weight'] = graph.edges()[arc]['weight']
@@ -442,14 +449,14 @@ def wilson_rst(graph: nx.DiGraph, root=0, log_probs: bool = False) -> nx.DiGraph
     # pick random node from x
     prev = [None] * n_nodes
     while x_set:
-        i = random.choice(list(x_set))
+        i = np.random.choice(list(x_set))
         u = i
         while u not in t_set:
             # loop-erased random walk
             if log_probs:
                 prev[u] = gumbel_max_trick_sample(weights[:, u])
             else:
-                prev[u] = random.choices(range(n_nodes), k=1, weights=weights[:, u])[0]
+                prev[u] = np.random.choice(np.arange(n_nodes), size=1, p=weights[:, u])[0]
             u = prev[u]
         u = i
         while u not in t_set:

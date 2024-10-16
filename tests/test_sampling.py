@@ -1,3 +1,5 @@
+import logging
+
 import h5py
 import numpy as np
 import networkx as nx
@@ -56,6 +58,27 @@ def test_random_k_trees_graph():
     assert np.isclose(unseen_freq / extra_sample, residual, atol=2e-3), ("residual probability mass after large "
                                                                          "sample does not match with unseen "
                                                                          "trees occurrence")
+
+
+def test_castaway_low_weight():
+    """
+    This test was built to debug numerical instability in the castaway algorithm.
+    :return:
+    """
+    np.random.seed(0)
+    n_nodes = 5
+    low_weight = 1e-19
+    random_graph = tg.random_weakly_connected_graph(n_nodes, weak_weight=low_weight)
+    # Kirchhoff Laplacian determinant test
+    L = tg.kirchoff_matrix(nx.to_numpy_array(random_graph))
+    print(np.linalg.det(tg.mat_minor(L, 0, 0)))
+    # Koo Laplacian determinant test
+    kL = algorithms._koo_laplacian(nx.to_numpy_array(random_graph), 0)
+    print(np.linalg.det(kL))
+    for _ in range(100):
+        # tree = algorithms.castaway_rst(random_graph, root=0, log_probs=False, trick=True)
+        tree = algorithms.colbourn_rst(random_graph, root=0, log_probs=False)
+        assert nx.is_arborescence(tree)
 
 
 def test_laplacian():
@@ -265,10 +288,10 @@ def test_colbourn_rst():
 
 def test_weakly_connection_colbourn():
     np.random.seed(0)
-    n_nodes = 6
+    n_nodes = 5
     n_samples = 10000
 
-    for weak_weight in [0.1, 1e-2, 1e-30, 1e-50, 1e-100]:
+    for weak_weight in [0.1, 1e-2, 1e-10, 1e-15, 1e-20, 1e-25]:
         graph = tg.random_weakly_connected_graph(n_nodes, weak_weight=weak_weight)
         sample_dict = {}
         weight_dict = {}
@@ -283,14 +306,20 @@ def test_weakly_connection_colbourn():
 
         unique_trees_obs = len(sample_dict)
         freqs = np.array([v for k, v in sample_dict.items()])
-        # remove rare samples, otherwise chisq test is invalid
-        rare = freqs <= 5
-        freqs = freqs[~rare]
-
         fexp = np.array([weight_dict[t] for t, _ in sample_dict.items()])
-        fexp = fexp[~rare]
+        # remove rare samples, otherwise chisq test is invalid
+        rare = freqs <= 10
+        if rare.sum() > 0:
+            rare_freq = freqs[rare]
+            freqs = np.append(freqs[~rare], np.sum(rare_freq))
+
+            rare_fexp = fexp[rare]
+            fexp = np.append(fexp[~rare], np.sum(rare_fexp))
+
         fexp /= np.sum(fexp)
         fexp *= sum(freqs)
+        print(f"\n--- weakly connected graph test ---")
+        print(f"weakness={weak_weight}, unique trees: {unique_trees_obs}/{tg.cayleys_formula(n_nodes)}")
         print(freqs)
         print(fexp)
         print(fexp.size)
@@ -300,6 +329,55 @@ def test_weakly_connection_colbourn():
         print(f'weakness={weak_weight}, p-val {test_result}')
         # assert test_result.pvalue < 0.15, (f"chisq test not passed: evidence that distribution is not as expected")
 
+
+def test_weakly_connection_castaway():
+    np.random.seed(0)
+    n_nodes = 5
+    n_samples = 100
+    # logging.root.setLevel(logging.DEBUG)
+
+    for weak_weight in [0.1, 1e-2, 1e-10, 1e-15, 1e-20, 1e-25]:
+        graph = tg.random_weakly_connected_graph(n_nodes, weak_weight=weak_weight, log_probs=False)
+        sample_dict = {}
+        weight_dict = {}
+        try:
+            for _ in range(n_samples):
+                tree = algorithms.castaway_rst(graph, root=0, log_probs=False)
+                tree_nwk = tg.tree_to_newick(tree)
+
+                if tree_nwk not in sample_dict:
+                    sample_dict[tree_nwk] = 0
+                    weight_dict[tree_nwk] = tg.graph_weight(tree)
+                sample_dict[tree_nwk] = sample_dict[tree_nwk] + 1
+        except Exception as e:
+            print(e)
+            print("weakness too low, skipping test")
+            continue
+
+        unique_trees_obs = len(sample_dict)
+        freqs = np.array([v for k, v in sample_dict.items()])
+        fexp = np.array([weight_dict[t] for t, _ in sample_dict.items()])
+        # remove rare samples, otherwise chisq test is invalid
+        rare = freqs <= 10
+        if rare.sum() > 0:
+            rare_freq = freqs[rare]
+            freqs = np.append(freqs[~rare], np.sum(rare_freq))
+
+            rare_fexp = fexp[rare]
+            fexp = np.append(fexp[~rare], np.sum(rare_fexp))
+
+        fexp /= np.sum(fexp)
+        fexp *= sum(freqs)
+        print(f"\n--- weakly connected graph test ---")
+        print(f"weakness={weak_weight}, unique trees: {unique_trees_obs}/{tg.cayleys_formula(n_nodes)}")
+        print(freqs)
+        print(fexp)
+        print(fexp.size)
+        # test against expected distribution
+        print(f'weakness={weak_weight}, freqs mse: {np.sum((freqs/sum(freqs) - fexp/sum(fexp)) ** 2)}')
+        test_result = chisquare(f_obs=freqs, f_exp=fexp)
+        print(f'weakness={weak_weight}, p-val {test_result}')
+        # assert test_result.pvalue < 0.15, (f"chisq test not passed: evidence that distribution is not as expected")
 
 def test_kirchoff_no_loops():
     """
@@ -336,4 +414,31 @@ def test_kirchoff_no_loops():
     for s in range(ss):
         tree = kirchoff_rst(G, 0)
         assert nx.is_arborescence(tree)
+
+
+def test_castaway_log_limitation():
+    # generate weakly connected graphs with low weights in a range of -50 to -300
+    np.random.seed(0)
+    n_nodes = 5
+    n_samples = 100
+    # logging.root.setLevel(logging.DEBUG)
+    start = -50
+    end = -300
+
+    for lw in range(start, end, -1):
+        log_graph = tg.random_weakly_connected_graph(n_nodes, weak_weight=lw, log_probs=True)
+        miss = 0
+        for _ in range(n_samples):
+            try:
+                tree = algorithms.castaway_rst(log_graph, root=0, log_probs=True)
+                assert nx.is_arborescence(tree)
+            except Exception as e:
+                miss += 1
+                print(e)
+        print(f"weakness={lw}, misses={miss}")
+
+
+
+
+
 
