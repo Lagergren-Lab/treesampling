@@ -2,6 +2,7 @@ import time
 import random
 import networkx as nx
 import numpy as np
+import scipy.stats as ss
 
 from treesampling.utils.math import logsubexp, gumbel_max_trick_sample
 from treesampling.utils.graphs import graph_weight, tuttes_tot_weight, reset_adj_matrix, mat_minor
@@ -9,6 +10,25 @@ from treesampling.utils.graphs import graph_weight, tuttes_tot_weight, reset_adj
 from treesampling.utils.graphs import random_uniform_graph, normalize_graph_weights
 from warnings import warn
 
+def lambda_rst(graph: nx.DiGraph, root=0, log_probs: bool = False) -> nx.DiGraph:
+    """
+    Implementation of the Lambda algorithm for sampling trees
+    :param graph: nx.DiGraph, with weights on arcs
+    :param root: label of the root in the graph
+    :param log_probs: if the graph has log-weights
+    :return:
+    """
+    # FIXME: check for log weights (maybe Gumbel)
+    if log_probs:
+        raise ValueError("Lambda RST not implemented for log-probabilities")
+    # FIXME: check root node choice
+    if root != 0:
+        raise ValueError("Lambda RST not implemented for arbitrary root")
+
+    Lambda = nx.to_numpy_array(graph)
+    W = ss.expon(Lambda).rvs(size=1)
+    w_graph = reset_adj_matrix(graph, W)
+    return nx.maximum_spanning_arborescence(w_graph, attr='weight', default=1)
 
 def random_spanning_tree(graph: nx.DiGraph, root=0) -> nx.DiGraph:
     warn('Use the new function ' + castaway_rst.__name__ + ' with log_probs=False', DeprecationWarning, stacklevel=2)
