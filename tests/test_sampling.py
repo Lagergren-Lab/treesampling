@@ -337,3 +337,40 @@ def test_kirchoff_no_loops():
         tree = kirchoff_rst(G, 0)
         assert nx.is_arborescence(tree)
 
+
+def test_lambda_rst():
+    n_nodes = 5
+    L = 5
+    adj_mat = np.random.random((n_nodes, n_nodes))
+    np.fill_diagonal(adj_mat, 0)
+    print(adj_mat)
+
+    graph = nx.from_numpy_array(adj_mat, create_using=nx.DiGraph)
+    sample_size = 1000
+    freq_dict = {}
+    tree_dict = {}
+    for s in range(sample_size):
+        tree = algorithms.lambda_rst(graph, root=0, log_probs=False)
+        tree_nwk = tg.tree_to_newick(tree)
+        # print(tree_nwk)
+        if tree_nwk not in freq_dict:
+            freq_dict[tree_nwk] = 0
+            tree_dict[tree_nwk] = tree
+        freq_dict[tree_nwk] = freq_dict[tree_nwk] + 1
+
+    # filter trees that occur more than L times
+    print(f"number of trees: {len(freq_dict)}")
+    freq_dict = {k: v for k, v in freq_dict.items() if v > L}
+
+    print(f"number of trees with frequency > {L}: {len(freq_dict)}")
+    for t_nwk, f in freq_dict.items():
+        print(t_nwk, f)
+
+    # correlation between frequency and weight of trees
+    weights = np.array([tg.graph_weight(tree_dict[tree_nwk]) for tree_nwk in freq_dict.keys()])
+    freqs = np.array([v for v in freq_dict.values()])
+    print(np.corrcoef(weights, freqs))
+    # assert np.corrcoef(weights, freqs)[0, 1] > 0.95
+
+
+

@@ -10,6 +10,7 @@ from treesampling.utils.graphs import graph_weight, tuttes_tot_weight, reset_adj
 from treesampling.utils.graphs import random_uniform_graph, normalize_graph_weights
 from warnings import warn
 
+
 def lambda_rst(graph: nx.DiGraph, root=0, log_probs: bool = False) -> nx.DiGraph:
     """
     Implementation of the Lambda algorithm for sampling trees
@@ -26,9 +27,11 @@ def lambda_rst(graph: nx.DiGraph, root=0, log_probs: bool = False) -> nx.DiGraph
         raise ValueError("Lambda RST not implemented for arbitrary root")
 
     Lambda = nx.to_numpy_array(graph)
-    W = ss.expon(Lambda).rvs(size=1)
+    W = ss.expon(Lambda).rvs(size=Lambda.shape)
+    # print(W)
     w_graph = reset_adj_matrix(graph, W)
     return nx.maximum_spanning_arborescence(w_graph, attr='weight', default=1)
+
 
 def random_spanning_tree(graph: nx.DiGraph, root=0) -> nx.DiGraph:
     warn('Use the new function ' + castaway_rst.__name__ + ' with log_probs=False', DeprecationWarning, stacklevel=2)
