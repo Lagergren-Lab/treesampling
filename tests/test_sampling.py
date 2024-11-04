@@ -8,7 +8,7 @@ from scipy.stats import chisquare
 
 from treesampling import algorithms
 import treesampling.utils.graphs as tg
-from treesampling.algorithms import castaway_rst, kirchoff_rst
+from treesampling.algorithms import CastawayRST, kirchoff_rst
 
 
 def test_log_random_uniform_graph():
@@ -38,8 +38,9 @@ def test_random_k_trees_graph():
     sample = {}
     acc = 0
     num = 0
+    smplr = CastawayRST(log_graph, root=root, log_probs=True, trick=True)
     for i in range(sample_size):
-        tree = algorithms.castaway_rst(log_graph, root=root, log_probs=True)
+        tree = smplr.sample_tree()
         tree_nwk = tg.tree_to_newick(tree)
         if tree_nwk not in sample:
             weight = np.exp(tg.graph_weight(tree, log_probs=True))
@@ -51,7 +52,7 @@ def test_random_k_trees_graph():
     residual = 1 - acc / tot_weight
     unseen_freq = 0
     for i in range(extra_sample):
-        tree = algorithms.castaway_rst(log_graph, root=root, log_probs=True)
+        tree = smplr.sample_tree()
         if tg.tree_to_newick(tree) not in sample:
             unseen_freq += 1
 
@@ -133,13 +134,8 @@ def test_uniform_graph_sampling():
     tot_trees = tg.cayleys_formula(n_nodes)
 
     sample_size = 3 * tot_trees
-    sample_dict = {}
-    for s in range(sample_size):
-        tree = algorithms.castaway_rst(graph, root=0)
-        tree_nwk = tg.tree_to_newick(tree)
-        if tree_nwk not in sample_dict:
-            sample_dict[tree_nwk] = 0
-        sample_dict[tree_nwk] = sample_dict[tree_nwk] + 1
+    smplr = CastawayRST(graph, root=0, log_probs=False, trick=True)
+    sample_dict = smplr.sample(sample_size)
 
     unique_trees_obs = len(sample_dict)
     freqs = np.pad(np.array([v for k, v in sample_dict.items()]) / sample_size,
@@ -168,7 +164,8 @@ def test_unbalanced_weights():
 
     graph = nx.complete_graph(n_nodes, create_using=nx.DiGraph)
     graph = tg.reset_adj_matrix(graph, adj_matrix)
-    tree = algorithms.castaway_rst(graph, root, log_probs=True, trick=True)
+    smplr = CastawayRST(graph, root=root, log_probs=True, trick=True)
+    tree = smplr.sample_tree()
     exp_graph = tg.reset_adj_matrix(graph, np.exp(adj_matrix))
     assert tg.tree_to_newick(tree) == tg.tree_to_newick(nx.maximum_spanning_arborescence(exp_graph))
 
@@ -190,13 +187,9 @@ def test_victree_output():
     graph = tg.reset_adj_matrix(graph, exp_weights)
     graph = tg.normalize_graph_weights(graph)
     ss = 100
-    sample = {}
-    for i in range(ss):
-        tree = castaway_rst(graph, root=0, log_probs=False, trick=True)
-        tnwk = tg.tree_to_newick(tree)
-        if tnwk not in sample:
-            sample[tnwk] = 0
-        sample[tnwk] += 1
+    smplr = CastawayRST(graph, root=0, log_probs=False, trick=True)
+    sample = smplr.sample(ss)
+
     print(sample)
     max_freq_tree_nwk = max(sample, key=sample.get)
     for i in range(K):
@@ -340,19 +333,15 @@ def test_weakly_connection_castaway():
         graph = tg.random_weakly_connected_graph(n_nodes, weak_weight=weak_weight, log_probs=False)
         sample_dict = {}
         weight_dict = {}
+        smplr = CastawayRST(graph, root=0, log_probs=False, trick=False)
         try:
-            for _ in range(n_samples):
-                tree = algorithms.castaway_rst(graph, root=0, log_probs=False)
-                tree_nwk = tg.tree_to_newick(tree)
-
-                if tree_nwk not in sample_dict:
-                    sample_dict[tree_nwk] = 0
-                    weight_dict[tree_nwk] = tg.graph_weight(tree)
-                sample_dict[tree_nwk] = sample_dict[tree_nwk] + 1
+            sample_dict = smplr.sample(n_samples)
         except Exception as e:
             print(e)
             print("weakness too low, skipping test")
             continue
+        for tree, _ in sample_dict.items():
+            weight_dict[tree] = tg.graph_weight(tree)
 
         unique_trees_obs = len(sample_dict)
         freqs = np.array([v for k, v in sample_dict.items()])
@@ -422,23 +411,38 @@ def test_castaway_log_limitation():
     n_nodes = 5
     n_samples = 100
     # logging.root.setLevel(logging.DEBUG)
-    start = -50
-    end = -300
+    start = -100
+    end = -1000
 
-    for lw in range(start, end, -1):
+    for lw in range(start, end, -10):
         log_graph = tg.random_weakly_connected_graph(n_nodes, weak_weight=lw, log_probs=True)
         miss = 0
         for _ in range(n_samples):
             try:
-                tree = algorithms.castaway_rst(log_graph, root=0, log_probs=True)
+                smplr = CastawayRST(log_graph, root=0, log_probs=True, trick=False)
+                tree = smplr.sample_tree()
                 assert nx.is_arborescence(tree)
             except Exception as e:
                 miss += 1
                 print(e)
         print(f"weakness={lw}, misses={miss}")
 
-
-
-
-
+def test_castaway_uncomplete_graph():
+    # generate a graph with some missing arcs
+    np.random.seed(0)
+    n_nodes = 5
+    n_samples = 100
+    for log_probs in [True, False]:
+        print(f"--- log_probs: {log_probs} ---")
+        graph = tg.random_uniform_graph(n_nodes, log_probs=log_probs)
+        removed_arcs = [(0, 1), (1, 2), (2, 3), (3, 4)]
+        for arc in removed_arcs:
+            graph.remove_edge(*arc)
+        print(f"adj matrix: {nx.to_numpy_array(graph)}")
+        smplr = CastawayRST(graph, root=0, log_probs=log_probs)
+        for _ in range(n_samples):
+            tree = smplr.sample_tree()
+            assert nx.is_arborescence(tree)
+            for arc in removed_arcs:
+                assert not tree.has_edge(*arc), f"log_probs: {log_probs}, tree: {tree.edges()}"
 
