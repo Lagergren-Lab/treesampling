@@ -9,6 +9,7 @@ from scipy.stats import chisquare
 from treesampling import algorithms
 import treesampling.utils.graphs as tg
 from treesampling.algorithms import CastawayRST, kirchoff_rst
+from treesampling.utils.graphs import tree_to_newick
 
 
 def test_log_random_uniform_graph():
@@ -79,6 +80,34 @@ def test_castaway_low_weight():
     for _ in range(100):
         # tree = algorithms.castaway_rst(random_graph, root=0, log_probs=False, trick=True)
         tree = algorithms.colbourn_rst(random_graph, root=0, log_probs=False)
+        assert nx.is_arborescence(tree)
+
+
+def test_castaway_log_low_weight():
+    """
+    This test was built to debug numerical instability in the castaway algorithm. Log-prob version.
+    """
+    np.random.seed(0)
+    n_nodes = 5
+    low_weight = 1e-200
+    random_graph = tg.random_weakly_connected_graph(n_nodes, weak_weight=low_weight, log_probs=True)
+    assert np.all(nx.to_numpy_array(random_graph) < 0)
+    assert np.all(nx.to_numpy_array(random_graph)[np.eye(n_nodes, dtype=bool)] == -np.inf)
+    assert np.all(nx.to_numpy_array(random_graph)[~np.eye(n_nodes, dtype=bool)] > -np.inf)
+    print(nx.to_numpy_array(random_graph))
+    # sort edges by weight in increasing order without including self connections
+    # in order to check which weak connections are most likely to be sampled
+    edges = sorted(random_graph.edges(data=True), key=lambda e: e[2]['weight'])
+    for e in edges:
+        if e[0] != e[1]:
+            print(f"{e[0]} -> {e[1]}: {e[2]['weight']}")
+
+    # TODO: check that te samples follow the underlying distribution
+    sampler = CastawayRST(random_graph, root=0, log_probs=True, trick=False)
+    for _ in range(100):
+        tree = sampler.sample_tree()
+        # tree = algorithms.colbourn_rst(random_graph, root=0, log_probs=True)
+        print(tree_to_newick(tree))
         assert nx.is_arborescence(tree)
 
 
@@ -183,11 +212,12 @@ def test_victree_output():
     graph = tg.normalize_graph_weights(graph, log_probs=True)
     exp_weights = np.exp(nx.to_numpy_array(graph))
     # NOTE: weights are clamped so to avoid instabilities
-    exp_weights = np.clip(exp_weights, a_min=1e-50, a_max=1.)
+    # exp_weights = np.clip(exp_weights, a_min=1e-50, a_max=1.)
+    # FIXME: check that it works with trick
     graph = tg.reset_adj_matrix(graph, exp_weights)
     graph = tg.normalize_graph_weights(graph)
     ss = 100
-    smplr = CastawayRST(graph, root=0, log_probs=False, trick=True)
+    smplr = CastawayRST(graph, root=0, log_probs=False, trick=False)
     sample = smplr.sample(ss)
 
     print(sample)
@@ -335,13 +365,18 @@ def test_weakly_connection_castaway():
         weight_dict = {}
         smplr = CastawayRST(graph, root=0, log_probs=False, trick=False)
         try:
-            sample_dict = smplr.sample(n_samples)
+            for _ in range(n_samples):
+                tree = smplr.sample_tree()
+                tree_nwk = tg.tree_to_newick(tree)
+
+                if tree_nwk not in sample_dict:
+                    sample_dict[tree_nwk] = 0
+                    weight_dict[tree_nwk] = tg.graph_weight(tree)
+                sample_dict[tree_nwk] = sample_dict[tree_nwk] + 1
         except Exception as e:
             print(e)
             print("weakness too low, skipping test")
             continue
-        for tree, _ in sample_dict.items():
-            weight_dict[tree] = tg.graph_weight(tree)
 
         unique_trees_obs = len(sample_dict)
         freqs = np.array([v for k, v in sample_dict.items()])

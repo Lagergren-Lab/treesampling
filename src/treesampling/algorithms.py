@@ -26,6 +26,14 @@ class CastawayRST(TreeSampler):
         self.trick = trick
         self._adjust_graph()
 
+        # initialize x set
+        self.x_list = list(set(self.graph.nodes()).difference([self.root]))
+        # precompute Wx table where X = V \ {root}
+        if not self.log_probs:
+            self.complete_wx_table = self._compute_wx_table(self.x_list)
+        else:
+            self.complete_wx_table = self._compute_wx_table_log(self.x_list)
+
     def _adjust_graph(self):
         # add missing edges with null weight and normalize
         missing_edges = nx.difference(nx.complete_graph(self.graph.number_of_nodes()), self.graph)
@@ -63,6 +71,8 @@ class CastawayRST(TreeSampler):
             is computed from scratch every time a new arc is added to the tree
         :return:
         """
+        # reset x_list
+        self.x_list = list(set(self.graph.nodes()).difference([self.root]))
 
         if self.log_probs:
             return self._castaway_rst_log()
@@ -246,10 +256,8 @@ class CastawayRST(TreeSampler):
         tree = nx.DiGraph()
         tree.add_node(self.root)
         dangling_path: list[tuple] = []  # store dangling path branch (not yet attached to tree, not in X)
-        x_list = list(set(self.graph.nodes()).difference([self.root]))  # X set
-        # precompute Wx table
-        # build wx with X = V \ {root}
-        wx_table = self._compute_wx_table_log(x_list)
+        x_list = self.x_list
+        wx_table = self.complete_wx_table.copy()
         # iterate for each node
         while len(x_list) > 1:
             # print(f"+ TREE: {tree_to_newick(tree)}")
@@ -331,6 +339,9 @@ class CastawayRST(TreeSampler):
 
 
     def _update_wx_log(self, wy_table, u) -> dict:
+        """
+        Update the Wx table by removing the node u from the set Y.
+        """
         # speed up trick
         wx_table = {}
         if wy_table[u, u] == - np.inf:
@@ -342,9 +353,22 @@ class CastawayRST(TreeSampler):
                         # wx can't be any less than that (avoids logsubexp(-inf, a) where -np.inf < a << 0 )
                         a = - np.inf
                     else:
-                        # TODO: find a way of replacing - wy_table[u, u] with + out_y_u (logsumexp of out of Y from u)
+                        # probability of going out of Y from u (out means not in u and not in x)
+                        log_out_y_u = np.logaddexp.reduce(
+                            np.array([self.graph.edges()[u, v]['weight'] for v in self.graph.successors(u) if v not in self.x_list]))
+                        # FIXME: check this condition
+                        # since normalization is by col, out_y_u can be larger than 1.
+                        # assert log_out_y_u < 0, f"log_out_y_u: {log_out_y_u}"
+
+                        if wy_table[u, u] > - log_out_y_u:
+                            print(f"WARNING: wy_table[u, u]: {wy_table[u, u]}, log_out_y_u: {log_out_y_u}")
+                        ry = np.clip(wy_table[u, u], a_min=None, a_max=-log_out_y_u)
+                        # ry = wy_table[u, u]
+
                         Wy = wy_table[v, w]
-                        Wy_through_u = wy_table[v, u] + wy_table[u, w] - wy_table[u, u]
+                        Wy_through_u = wy_table[v, u] + wy_table[u, w] - ry
+                        if Wy_through_u > Wy:
+                            print(f"WARNING: Wy_through_u: {Wy_through_u}, Wy: {Wy}")
                         a = logsubexp(Wy, Wy_through_u)
                     wx_table[v, w] = a
         return wx_table
@@ -357,6 +381,7 @@ class CastawayRST(TreeSampler):
         v = x_set[0]
         wx = {(v, v): 0}
 
+        # construct Wx table iteratively adding one node at a time from the X set
         for i in range(1, len(x_set)):
             # print(f"current wx: {wx}")
             x = x_set[:i]
