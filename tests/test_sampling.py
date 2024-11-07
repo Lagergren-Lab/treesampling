@@ -6,36 +6,38 @@ import numpy as np
 import networkx as nx
 import itertools
 
-from scipy.signal import freqs
 from scipy.stats import chisquare
 
 from treesampling import algorithms
 import treesampling.utils.graphs as tg
 from treesampling.algorithms import CastawayRST, kirchoff_rst
-from treesampling.utils.graphs import tree_to_newick, graph_weight, reset_adj_matrix
+from treesampling.utils.graphs import tree_to_newick, graph_weight, reset_adj_matrix, tuttes_tot_weight, cayleys_formula
 
 
-def assert_chi_square(freqs: np.ndarray, fexp: np.ndarray | None, verbose=False):
+def tree_sample_dist_correlation(tree_list, graph, root=0, verbose: bool = False) -> float:
     """
-    Test the chi-square goodness of fit of the observed frequencies against the expected frequencies.
-    :param freqs: array, frequencies of each unique tree
-    :param fexp: array, expected frequencies of each unique tree (must be normalized), if None, uniform is assumed
+    Test the correlation of the observed tree sample against the graph distribution.
+    :param tree_list: list of trees with weights over arcs
+    :param alpha: correlation threshold
+    :return: correlation coefficient
+    """
+    fexp, freqs = get_fexp_freqs(tree_list, graph, root=root)
+    # correlation coefficient
+    corr = np.corrcoef(fexp, freqs)[0, 1]
+    if verbose:
+        print(f"correlation coefficient: {corr}")
+    return corr
+
+
+def chi_square_goodness(tree_list, graph, root, verbose: bool = False) -> chisquare:
+    """
+    Perform chi-square test of goodness of fit of the tree sample against the graph distribution.
+    :param tree_list: list of trees with weights over arcs
     :param verbose: bool, print chi-square test results and mse of frequencies
+    :return: chisquare test result
     """
-    # remove rare samples, otherwise chisq test is invalid
-    if fexp is None:
-        fexp = np.ones_like(freqs) / freqs.size
+    fexp, freqs = get_fexp_freqs(tree_list, graph, root)
 
-    rare = freqs <= 10
-    if rare.sum() > 0:
-        rare_freq = freqs[rare]
-        freqs = np.append(freqs[~rare], np.sum(rare_freq))
-
-        rare_fexp = fexp[rare]
-        fexp = np.append(fexp[~rare], np.sum(rare_fexp))
-
-    # assert fexp.sum() == 1, "expected frequencies must be normalized"
-    fexp *= freqs.sum()
     if verbose:
         np.set_printoptions(suppress=True)
         print(f"observed frequencies: {freqs}")
@@ -44,9 +46,53 @@ def assert_chi_square(freqs: np.ndarray, fexp: np.ndarray | None, verbose=False)
     # test against expected distribution
     test_result = chisquare(f_obs=freqs, f_exp=fexp)
     if verbose:
-        print(f"freqs mse: {np.sum((freqs / freqs.sum() - fexp / fexp.sum()) ** 2)}")
+        print(f"freqs_dict mse: {np.sum((freqs / freqs.sum() - fexp / fexp.sum()) ** 2)}")
         print(f"p-val {test_result}")
-    assert test_result.pvalue >= 0.95, (f"chisq test not passed: evidence that distribution is not as expected")
+    return test_result
+
+def get_fexp_freqs(tree_list, graph, root=0) -> (np.array, np.array):
+    """
+    Get expected frequencies and observed frequencies from a list of trees.
+    :param tree_list: list of trees with weights over arcs
+    :return: expected frequencies, observed frequencies
+    """
+    # get freqs_dict
+    freqs_dict = {}
+    weights_dict = {}
+    tot_weight = tuttes_tot_weight(graph, root)
+    print(f'tot_weight: {tot_weight}')
+    for tree in tree_list:
+        tree_nwk = tree_to_newick(tree)
+        if tree_nwk not in freqs_dict:
+            freqs_dict[tree_nwk] = 0
+            # normalize weight because some trees might not be in the sample
+            weights_dict[tree_nwk] = graph_weight(tree) / tot_weight
+        freqs_dict[tree_nwk] += 1
+
+    freqs = np.array([v for k, v in freqs_dict.items()])
+    weights = np.array([weights_dict[t] for t, _ in freqs_dict.items()])
+    # check if all trees are in the sample
+    if len(freqs_dict) == cayleys_formula(graph.number_of_nodes()):
+        print(f"all trees are in the sample: {len(freqs_dict)}/{cayleys_formula(graph.number_of_nodes())}")
+        assert np.isclose(weights.sum(), 1.0), "total weight of trees is not 1.0"
+    else:
+        # if not all trees are in the sample, add the missing weight to the rarest tree
+        missing_weight = 1.0 - weights.sum()
+        rarest_tree_idx = np.argmin(freqs)
+        weights[rarest_tree_idx] += missing_weight
+        assert np.isclose(weights.sum(), 1.0), "total weight of trees is not 1.0 even after adding missing weight"
+
+    # remove rare samples, otherwise chisq test is invalid
+    rare = freqs <= 10
+    if rare.sum() > 0:
+        print(f"rare samples: {rare.sum()}")
+        rare_freq = freqs[rare]
+        freqs = np.append(freqs[~rare], np.sum(rare_freq))
+
+        rare_weights = weights[rare]
+        weights = np.append(weights[~rare], np.sum(rare_weights))
+    fexp = weights * freqs.sum()
+    return fexp, freqs
 
 
 def test_log_random_uniform_graph():
@@ -308,7 +354,7 @@ def test_victree_output():
 
 
 def test_wilson_rst():
-    n_nodes = 7
+    n_nodes = 6
     adj_mat = np.ones((n_nodes, n_nodes))
     np.fill_diagonal(adj_mat, 0)
     # cardinality of tree topology

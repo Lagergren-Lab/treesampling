@@ -4,7 +4,7 @@ from statsmodels.stats.proportion import proportions_ztest
 
 import treesampling.algorithms as ta
 from treesampling.utils.graphs import enumerate_rooted_trees, cayleys_formula, kirchhoff_tot_weight, \
-    normalize_graph_weights, tree_to_newick, reset_adj_matrix, tuttes_tot_weight, adjoint
+    normalize_graph_weights, tree_to_newick, reset_adj_matrix, tuttes_tot_weight, adjoint, graph_weight
 from treesampling.utils.math import generate_random_matrix
 
 
@@ -14,6 +14,21 @@ def test_enumerate_rooted_trees():
     tot_trees = cayleys_formula(n_nodes)
     assert len(trees) == tot_trees
 
+def test_tuttes_tot_weight():
+    n_nodes = 5
+    weights = np.random.random((n_nodes, n_nodes))
+    np.fill_diagonal(weights, 0)
+    graph = nx.from_numpy_array(weights)
+    graph = normalize_graph_weights(graph)
+    root = 0
+    tot_weight = tuttes_tot_weight(graph, root)
+    # enumerate all trees
+    trees = enumerate_rooted_trees(n_nodes, root, graph)
+    acc = 0
+    for t in trees:
+        acc += graph_weight(t)
+
+    assert np.isclose(tot_weight, acc)
 
 def test_edge_contraction():
     np.random.seed(0)
