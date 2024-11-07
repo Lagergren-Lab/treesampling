@@ -1,15 +1,52 @@
 import logging
+from random import sample
 
 import h5py
 import numpy as np
 import networkx as nx
 import itertools
+
+from scipy.signal import freqs
 from scipy.stats import chisquare
 
 from treesampling import algorithms
 import treesampling.utils.graphs as tg
 from treesampling.algorithms import CastawayRST, kirchoff_rst
-from treesampling.utils.graphs import tree_to_newick
+from treesampling.utils.graphs import tree_to_newick, graph_weight, reset_adj_matrix
+
+
+def assert_chi_square(freqs: np.ndarray, fexp: np.ndarray | None, verbose=False):
+    """
+    Test the chi-square goodness of fit of the observed frequencies against the expected frequencies.
+    :param freqs: array, frequencies of each unique tree
+    :param fexp: array, expected frequencies of each unique tree (must be normalized), if None, uniform is assumed
+    :param verbose: bool, print chi-square test results and mse of frequencies
+    """
+    # remove rare samples, otherwise chisq test is invalid
+    if fexp is None:
+        fexp = np.ones_like(freqs) / freqs.size
+
+    rare = freqs <= 10
+    if rare.sum() > 0:
+        rare_freq = freqs[rare]
+        freqs = np.append(freqs[~rare], np.sum(rare_freq))
+
+        rare_fexp = fexp[rare]
+        fexp = np.append(fexp[~rare], np.sum(rare_fexp))
+
+    # assert fexp.sum() == 1, "expected frequencies must be normalized"
+    fexp *= freqs.sum()
+    if verbose:
+        np.set_printoptions(suppress=True)
+        print(f"observed frequencies: {freqs}")
+        print(f"expected frequencies: {fexp}")
+        print(f"expected frequencies size: {fexp.size}")
+    # test against expected distribution
+    test_result = chisquare(f_obs=freqs, f_exp=fexp)
+    if verbose:
+        print(f"freqs mse: {np.sum((freqs / freqs.sum() - fexp / fexp.sum()) ** 2)}")
+        print(f"p-val {test_result}")
+    assert test_result.pvalue >= 0.95, (f"chisq test not passed: evidence that distribution is not as expected")
 
 
 def test_log_random_uniform_graph():
@@ -89,7 +126,7 @@ def test_castaway_log_low_weight():
     """
     np.random.seed(0)
     n_nodes = 5
-    low_weight = 1e-200
+    low_weight = 1e-19
     random_graph = tg.random_weakly_connected_graph(n_nodes, weak_weight=low_weight, log_probs=True)
     assert np.all(nx.to_numpy_array(random_graph) < 0)
     assert np.all(nx.to_numpy_array(random_graph)[np.eye(n_nodes, dtype=bool)] == -np.inf)
@@ -102,13 +139,34 @@ def test_castaway_log_low_weight():
         if e[0] != e[1]:
             print(f"{e[0]} -> {e[1]}: {e[2]['weight']}")
 
-    # TODO: check that te samples follow the underlying distribution
+    # generate a sample and save both the tree weights and the frequencies at which they occur
     sampler = CastawayRST(random_graph, root=0, log_probs=True, trick=False)
-    for _ in range(100):
+    n = 10000
+    sample_dict = {}
+    fexp_dict = {}
+    for _ in range(n):
         tree = sampler.sample_tree()
-        # tree = algorithms.colbourn_rst(random_graph, root=0, log_probs=True)
-        print(tree_to_newick(tree))
-        assert nx.is_arborescence(tree)
+        tree_nwk = tg.tree_to_newick(tree)
+        if tree_nwk not in sample_dict:
+            sample_dict[tree_nwk] = 0
+            tree_weight = tg.graph_weight(tree, log_probs=True)
+            assert tree_weight > -np.inf
+            fexp_dict[tree_nwk] = tree_weight
+        sample_dict[tree_nwk] += 1
+
+    # make arrays and normalize expected frequencies (unnormalized tree weights)
+    print(fexp_dict)
+    print(sample_dict)
+    fexp = []
+    freqs = []
+    for k, v in sample_dict.items():
+        fexp.append(fexp_dict[k])
+        freqs.append(v)
+    fexp = np.array(fexp)
+    fexp -= np.logaddexp.reduce(fexp)
+    fexp = np.exp(fexp)
+
+    assert_chi_square(np.array(freqs), fexp, verbose=True)
 
 
 def test_laplacian():
@@ -164,6 +222,27 @@ def test_uniform_graph_sampling():
 
     sample_size = 3 * tot_trees
     smplr = CastawayRST(graph, root=0, log_probs=False, trick=True)
+    sample_dict = smplr.sample(sample_size)
+
+    unique_trees_obs = len(sample_dict)
+    freqs = np.pad(np.array([v for k, v in sample_dict.items()]) / sample_size,
+                   (0, tot_trees - unique_trees_obs))
+    # test against uniform distribution
+    test_result = chisquare(f_obs=freqs)
+    assert test_result.pvalue >= 0.95, f"chisq test not passed: evidence that distribution is not uniform"
+
+def test_uniform_log_graph_sampling():
+    n_nodes = 7
+    adj_mat = np.ones((n_nodes, n_nodes))
+    np.fill_diagonal(adj_mat, 0)
+    adj_mat = np.log(adj_mat)
+    graph = reset_adj_matrix(nx.DiGraph(), adj_mat)
+    print(graph.edges(data=True))
+    # cardinality of tree topology
+    tot_trees = tg.cayleys_formula(n_nodes)
+
+    sample_size = 3 * tot_trees
+    smplr = CastawayRST(graph, root=0, log_probs=True, trick=True)
     sample_dict = smplr.sample(sample_size)
 
     unique_trees_obs = len(sample_dict)

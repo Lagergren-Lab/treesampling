@@ -75,9 +75,11 @@ class CastawayRST(TreeSampler):
         self.x_list = list(set(self.graph.nodes()).difference([self.root]))
 
         if self.log_probs:
-            return self._castaway_rst_log()
+            tree = self._castaway_rst_log()
         else:
-            return self._castaway_rst_plain()
+            tree =  self._castaway_rst_plain()
+        assert nx.is_arborescence(tree), "Tree is not an arborescence"
+        return tree
 
 
     def _castaway_rst_plain(self) -> nx.DiGraph:
@@ -398,9 +400,9 @@ class CastawayRST(TreeSampler):
                 ry_1 = np.logaddexp(ry_1, self.graph.edges()[u, v]['weight'] + wx[v, w] + self.graph.edges()[w, u]['weight'])
             # probability of going out of Y from u (out means not in u and not in x)
             log_out_y_u = np.logaddexp.reduce(np.array([self.graph.edges()[u, v]['weight'] for v in x_set[i + 1:]]))
+            # if np.log(1 - np.exp(ry_1)) < log_out_y_u:
+            #     print(f"ry_1: {ry_1}, log_out_y_u: {log_out_y_u}")
             # stable exponentiation: if ry_1 << 0 in log scale, then geometric series will be = 1 anyway
-            if np.log(1 - np.exp(ry_1)) < log_out_y_u:
-                print(f"ry_1: {ry_1}, log_out_y_u: {log_out_y_u}")
             ry = - np.clip(np.log(1 - np.exp(ry_1)), a_min=log_out_y_u, a_max=None)
 
             # compute Wy
