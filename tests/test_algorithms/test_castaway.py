@@ -1,21 +1,25 @@
-import random
-
 import networkx as nx
 import numpy as np
 from scipy.stats import alpha
 
 from treesampling.algorithms import CastawayRST
 from treesampling.algorithms.castaway import WxTable
-from treesampling.utils.graphs import random_uniform_graph, normalize_graph_weights, tree_to_newick, reset_adj_matrix
+from treesampling.utils.graphs import random_uniform_graph, normalize_graph_weights, tree_to_newick, reset_adj_matrix, \
+    mat_minor
 from tests.test_sampling import chi_square_goodness, tree_sample_dist_correlation
 
 
 def test_wx_table():
+    """
+    Check that wx table is independent of the order of the nodes in x and that
+    the trick outputs the same W table as the computation from scratch
+    """
     # random graph
     g = random_uniform_graph(5, log_probs=False)
     # normalize by col
     normalize_graph_weights(g, log_probs=False)
     wx = WxTable(x=[0, 1, 2, 3, 4], graph=g, log_probs=False)
+    print(wx.to_array())
 
     # test update
     # remove 4 from x
@@ -38,12 +42,17 @@ def test_wx_table():
 
 
 def test_wx_table_log():
+    """
+    LOG version of previous test:
+    Check that wx table is independent of the order of the nodes in x and that
+    the trick outputs the same W table as the computation from scratch
+    """
     # random graph
     g = random_uniform_graph(5, log_probs=True)
     # normalize by col
     g = normalize_graph_weights(g, log_probs=True)
     wx = WxTable(x=[0, 1, 2, 3, 4], graph=g, log_probs=True)
-    print(wx.get_wx())
+    print(wx.to_array())
 
     # test update
     # remove 4 from x
@@ -64,8 +73,69 @@ def test_wx_table_log():
         assert np.isclose(v, wx_4_order[k])
         assert np.isclose(v, wx_4_trick[k])
 
+def test_wx_table_log_accuracy():
+    """
+    Check that the Wx table is computed the same way in log scale and in linear scale
+    """
+    np.random.seed(42)
+    # compute wx table in log scale and in linear scale
+    # compare the results
+    g = random_uniform_graph(5, log_probs=False, normalize=True)
+    # zero is not included in x as it's the root node
+    wx = WxTable(x=[1, 2, 3, 4], graph=g, log_probs=False)
+    print("g matrix")
+    print(nx.to_numpy_array(g))
+
+    g_log = reset_adj_matrix(g, np.log(nx.to_numpy_array(g)))
+    # g_log = normalize_graph_weights(g_log, log_probs=True)
+    # normalize by col
+    marginal = np.logaddexp.reduce(nx.to_numpy_array(g_log), axis=0)
+    assert np.allclose(marginal, np.zeros(5))
+    print("g_log matrix")
+    print(nx.to_numpy_array(g_log))
+    wx_log = WxTable(x=[1, 2, 3, 4], graph=g_log, log_probs=True)
+
+    # test that tables are equal both when computed in log scale and in linear scale
+    # mat minor excludes the root node row/col from the table
+    wx_arr = mat_minor(wx.to_array(), 0, 0)
+    wx_log_arr = mat_minor(wx_log.to_array(), 0, 0)
+    assert np.allclose(np.log(wx_arr), wx_log_arr)
+    # print("log(wx_arr)")
+    # print(np.log(wx_arr))
+    # print("wx_log_arr")
+    # print(wx_log_arr)
+
+    assert np.allclose(np.exp(wx_log_arr), wx_arr)
+    # print("wx_arr")
+    # print(wx_arr)
+    # print("exp(wx_log_arr)")
+    # print(np.exp(wx_log_arr))
+
+def test_wx_table_log_accuracy_update():
+    """
+    Check that the trick update output the same W table both in log and linear scale
+    """
+    np.random.seed(42)
+    # compute wx table in log scale and in linear scale
+    # compare the results
+    g = random_uniform_graph(5, log_probs=False, normalize=True)
+    # zero is not included in x as it's the root node
+
+    wx = WxTable(x=[1, 2, 3, 4], graph=g, log_probs=False)
+
+    g_log = reset_adj_matrix(g, np.log(nx.to_numpy_array(g)))
+    wx_log = WxTable(x=[1, 2, 3, 4], graph=g_log, log_probs=True)
+
+    wx.update(1, trick=True)
+    wx_log.update(1, trick=True)
+    # remove both row/col 1 and 0
+    wx_arr = mat_minor(mat_minor(wx.to_array(), 1, 1), 0, 0)
+    wx_log_arr = mat_minor(mat_minor(wx_log.to_array(), 1, 1), 0, 0)
+    assert np.allclose(np.log(wx_arr), wx_log_arr)
+    assert np.allclose(np.exp(wx_log_arr), wx_arr)
+
+
 def test_castaway_uniform():
-    random.seed(42)
     np.random.seed(42)
     # random graph
     g = random_uniform_graph(5)
@@ -96,7 +166,6 @@ def test_castaway_uniform():
     assert corr >= 0.95, (f"correlation test not passed: evidence that distribution is not as expected")
 
 def test_castaway_uniform_log():
-    random.seed(42)
     np.random.seed(42)
     # random graph
     g = random_uniform_graph(5, log_probs=True)

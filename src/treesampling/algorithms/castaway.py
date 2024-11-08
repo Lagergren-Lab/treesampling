@@ -1,19 +1,36 @@
 import itertools
+import logging
 
 import networkx as nx
 import numpy as np
 
 from treesampling import TreeSampler
-from treesampling.utils.graphs import normalize_graph_weights, tree_to_newick
-from treesampling.utils.math import gumbel_max_trick_sample, logdiffexp, StableOp
+from treesampling.utils.graphs import normalize_graph_weights, tree_to_newick, random_uniform_graph
+from treesampling.utils.math import StableOp
 
 
 class WxTable:
-    def __init__(self, x: list, graph: nx.DiGraph, log_probs: bool = False):
+    def __init__(self, x: list, graph: nx.DiGraph, log_probs: bool = False, **kwargs):
         self.log_probs = log_probs
         self.x = x
         self.graph = graph
-        self.wx = self._build()
+        self.logger = logging.getLogger(self.__class__.__name__)
+        self.logger.setLevel(logging.INFO)
+        self.debug = kwargs.get('debug', False)
+        if self.debug:
+            self.logger.setLevel(logging.DEBUG)
+
+        self.wx_dict = self._build()
+        self._complete_x = self.x.copy()
+        self._complete_table = self.wx_dict.copy()
+
+    @property
+    def complete_table(self):
+        return self._complete_table
+
+    @property
+    def complete_x(self):
+        return self._complete_x
 
     def _build(self) -> dict:
         op = StableOp(log_probs=self.log_probs)  # dispatch stable operations
@@ -23,6 +40,7 @@ class WxTable:
         # base step: x = [v] (first node)
         v = self.x[0]
         wx = {(v, v): op.one()}
+        self.logger.debug(f"\t- Initializing Wx table with node {v}: wx = {wx}")
         for i in range(1, len(self.x)):
             x = self.x[:i]
             u = self.x[i]
@@ -34,8 +52,10 @@ class WxTable:
             for v, w in itertools.product(x, repeat=2):
                 ry_1 = op.add([ry_1, op.mul([gw[u, v], wx[v, w], gw[w, u]])])
                 # log: logaddexp(ry_1, gw[u, v] + wx[v, w] + gw[w, u])
+            self.logger.debug(f"\t- Ry(u, 1) for node {u} in Y = {x}: {ry_1}")
             ry = op.div(op.one(), op.sub(op.one(), ry_1))
             # log: -np.log(1 - np.exp(ry_1))
+            self.logger.debug(f"\t- Ry(u) for node {u} in Y = {x}: {ry}")
 
             # compute Wy
             # partial computations
@@ -54,14 +74,19 @@ class WxTable:
             for v in x:
                 wy[u, v] = op.mul([ry, wyx[v]]) # log: wy[u, v] = ry + wyx[v]
                 wy[v, u] = op.mul([wxy[v], ry]) # log: wy[v, u] = wxy[v] * ry
+                self.logger.debug(f"\t- Wy({u}, {v}) = ry({ry}) * wyx({v}) = {wy[u, v]}")
+                self.logger.debug(f"\t- Wy({v}, {u}) = wxy({v}) * ry({ry}) = {wy[v, u]}")
                 for w in x:
                     # general update
                     wy[v, w] = op.add([wx[v, w], op.mul([wxy[v], ry, wyx[w]])]) # log: wy[v, w] = logaddexp(wx[v, w], wxy[v] + ry + wyx[w])
+                    self.logger.debug(f"\t- Wy({v}, {w}) = wx({v}, {w}) + wxy({v}) * ry({ry}) * wyx({w}) = {wy[v, w]}")
             # new self returning random path
             wy[u, u] = ry
+            self.logger.debug(f"\t- Wy({u}, {u}) = ry({ry}) = {wy[u, u]}")
 
             # update wx
             wx = wy
+            self.logger.debug(f"\t- Updated Wx table with node {u}")
         return wx
 
     def update(self, u, trick=False):
@@ -74,26 +99,48 @@ class WxTable:
         assert u in self.x, f"Node {u} not in x set prior to removal and update"
         self.x = [v for v in self.x if v != u]
         if not self.x:
-            self.wx = {}
+            self.wx_dict = {}
         elif trick:
-            self.wx = self._update_trick(u)
+            self.wx_dict = self._update_trick(u)
         else:
-            self.wx = self._build()
+            self.wx_dict = self._build()
         # no nans allowed
-        assert not np.any([np.isnan(self.wx[k]) for k in self.wx]), f"NaN values in wx table: {self.wx} at node {u}"
+        assert not np.any([np.isnan(self.wx_dict[k]) for k in self.wx_dict]), f"NaN values in wx table: {self.wx_dict} at node {u}"
 
     def _update_trick(self, u) -> dict:
         op = StableOp(log_probs=self.log_probs)  # dispatch stable operations
+        self.logger.debug(f"\t- Updating Wx table removing node {u} using trick...")
         wx_table = {}
-        for (v, w) in self.wx.keys():
+        for (v, w) in self.wx_dict.keys():
             if v != u and w != u:
-                wx_table[v, w] = op.sub(self.wx[v, w], op.div(op.mul([self.wx[v, u], self.wx[u, w]]), self.wx[u, u]))
+                wx_table[v, w] = op.sub(self.wx_dict[v, w], op.div(op.mul([self.wx_dict[v, u], self.wx_dict[u, w]]), self.wx_dict[u, u]))
                 # log: logsubexp(self.wx[v, w], self.wx[v, u] + self.wx[u, w] - self.wx[u, u])
+                self.logger.debug(f"\t- Updated Wx({v}, {w}) = Wx({v}, {w})({self.wx_dict[v, w]})"
+                              f" - Wx({v}, {u})({self.wx_dict[v, u]}) * Wx({u}, {w})({self.wx_dict[u, w]}) / Wx({u}, {u})({self.wx_dict[u, u]}) = {wx_table[v, w]}")
         return wx_table
 
     def get_wx(self):
-        return self.wx
+        return self.wx_dict
 
+    def to_array(self):
+        wx_arr = wx_dict_to_array(self.wx_dict, self.graph.number_of_nodes())
+        return wx_arr
+
+    def reset(self):
+        self.x = self.complete_x.copy()
+        self.wx_dict = self._complete_table.copy()
+
+def wx_dict_to_array(wx_dict: dict, n_nodes: int) -> np.ndarray:
+    """
+    Convert a Wx dictionary to a numpy array. Nodes that are not in the table are set to 0.
+    :param wx_dict: dict, current Wx table with tuple (u, v) keys
+    :param n_nodes: int, total number of nodes in the graph
+    :return: np.ndarray, Wx table as a matrix
+    """
+    wx_arr = np.zeros((n_nodes, n_nodes))
+    for (i, j), v in wx_dict.items():
+        wx_arr[i, j] = v
+    return wx_arr
 
 class CastawayRST(TreeSampler):
 
@@ -110,10 +157,15 @@ class CastawayRST(TreeSampler):
         super().__init__(graph, root, log_probs, **kwargs)
         self.trick = trick
         self._adjust_graph()
+        self.logger = logging.getLogger(self.__class__.__name__)
+        self.logger.setLevel(logging.INFO)
+        self.debug = kwargs.get('debug', False)
+        if self.debug:
+            self.logger.setLevel(logging.DEBUG)
 
         # initialize x set to all nodes except the root
         self.x_list = list(set(self.graph.nodes()).difference([self.root]))
-        self.wx = WxTable(self.x_list, self.graph, log_probs=self.log_probs)
+        self.wx = WxTable(self.x_list, self.graph, log_probs=self.log_probs, debug=self.debug)
 
     def _adjust_graph(self):
         # add missing edges with null weight and normalize
@@ -154,7 +206,7 @@ class CastawayRST(TreeSampler):
         """
         # reset wx table
         self.x_list = list(set(self.graph.nodes()).difference([self.root]))
-        self.wx = WxTable(self.x_list, self.graph, log_probs=self.log_probs)
+        self.wx.reset()
 
         tree = self._castaway()
         assert nx.is_arborescence(tree), "Tree is not an arborescence"
@@ -171,18 +223,24 @@ class CastawayRST(TreeSampler):
 
         dangling_path: list[tuple] = []  # store dangling path branch (not yet attached to tree, not in X)
         # iterate for each node
+        self.logger.debug(f"Starting CastawayRST with x set: {self.wx.x} ({len(self.wx.x)} nodes)")
         while len(self.wx.x) > 0:
+            self.logger.debug(f"*** Remaining: {len(self.wx.x)}, x: {self.wx.x} ***")
             # choose new i from x if no dangling nodes
+            self.logger.debug("Picking new node i...")
             if not dangling_path:
                 # NOTE: stochastic vs sorted choice (should not matter)
                 # i_vertex = random.choice(self.wx.x)
                 i_vertex = self.wx.x[0]
+                self.logger.debug(f"- No dangling path, picking node {i_vertex} from x set")
             # or set i to be last node
             else:
                 latest_edge = dangling_path[-1]
                 i_vertex = latest_edge[0]
+                self.logger.debug(f"- Attaching dangling path {dangling_path} at node {i_vertex}")
 
             # update Wx table and remove x from x set
+            self.logger.debug(f"Updating Wx table and removing node {i_vertex} from x set...")
             self.wx.update(i_vertex, trick=self.trick)
 
             # for each node in either S or X - u, compute the probability of direct arc u -> i
@@ -230,7 +288,7 @@ class CastawayRST(TreeSampler):
         for u in self.wx.x:
             # lexit_i(u) = (sum_{v in X} (sum_{w in T} Ww,v) * Wv,u ) * p(u, i)
             # any w, v (from tree to X) * any v, u (from X to i) * p(u, i)
-            p_tree_u_i = op.mul([op.add([op.mul([pattach[v], self.wx.wx[v, u]]) for v in self.wx.x]), gw[u, i]])
+            p_tree_u_i = op.mul([op.add([op.mul([pattach[v], self.wx.wx_dict[v, u]]) for v in self.wx.x]), gw[u, i]])
             nodes.append((u, 'x'))
             w_choice.append(p_tree_u_i)
         w_choice = op.normalize(w_choice)
@@ -240,3 +298,22 @@ class CastawayRST(TreeSampler):
         u_vertex, origin_lab = nodes[u_idx]
 
         return u_vertex, origin_lab  # (u, origin) node label and origin ('t' or 'x')
+
+
+if __name__ == '__main__':
+    # debug algorithm steps
+    logging.basicConfig(level=logging.DEBUG)
+    np.random.seed(42)
+    # random graph
+    g = random_uniform_graph(5, log_probs=False, normalize=True)
+    sampler = CastawayRST(graph=g, root=0, log_probs=False, trick=True, debug=True)
+    logging.debug("Running CastawayRST on random graph (non log) with trick")
+    print("Wx matrix")
+    print(sampler.wx.to_array())
+    tree = sampler.sample_tree()
+    logging.debug(f"tree_to_newick(tree): {tree_to_newick(tree)}")
+
+
+
+
+

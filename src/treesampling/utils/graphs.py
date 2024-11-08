@@ -1,4 +1,3 @@
-import random
 import itertools
 from operator import mul
 from functools import reduce
@@ -51,14 +50,27 @@ def enumerate_rooted_trees(n_nodes, root=0, weighted_graph: nx.DiGraph | None = 
     return trees
 
 
-def random_uniform_graph(n_nodes, log_probs=False) -> nx.DiGraph:
+def random_uniform_graph(n_nodes, log_probs=False, normalize=None) -> nx.DiGraph:
+    """
+    Generate a random graph with random weights drawn from uniform distribution [0, 1].
+    :param n_nodes: int, number of nodes
+    :param log_probs: bool, if True, weights are log probabilities
+    :param normalize: bool, if True, normalize weights
+    :return: nx.DiGraph
+    """
     graph = nx.complete_graph(n_nodes, create_using=nx.DiGraph)
     for u, v in graph.edges():
         if u == v:
             w = 0
         else:
-            w = random.random()
+            w = np.random.random()
         graph.edges()[u, v]['weight'] = w if not log_probs else np.log(w)
+
+    if normalize is None:
+        print("normalization will switch to True by default in the future")
+        normalize = False
+    if normalize:
+        graph = normalize_graph_weights(graph, log_probs=log_probs)
     return graph
 
 
