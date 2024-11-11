@@ -36,11 +36,11 @@ class StableOp:
     def one(self):
         return 0.0 if self.log_probs else 1.0
 
-    def random_choice(self, arr):
+    def random_choice(self, arr: np.ndarray) -> int:
         if self.log_probs:
             return gumbel_max_trick_sample(arr)
         else:
-            return np.random.choice(len(arr), p=arr)
+            return np.random.choice(arr.size, p=arr)
 
     def normalize(self, arr):
         if self.log_probs:
@@ -69,7 +69,7 @@ def logdiffexp(l1, l2):
     return res
 
 
-def gumbel_max_trick_sample(log_probs):
+def gumbel_max_trick_sample(log_probs: np.ndarray) -> int:
     # check that input log probs are normalized
     assert np.isclose(np.logaddexp.reduce(log_probs), 0.0), (f"sum of log probs should be 0.0, but is "
                                                              f": {np.logaddexp.reduce(log_probs)}")

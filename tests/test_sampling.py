@@ -34,7 +34,8 @@ def chi_square_goodness(tree_list, graph, root, verbose: bool = False) -> chisqu
     Perform chi-square test of goodness of fit of the tree sample against the graph distribution.
     :param tree_list: list of trees with weights over arcs
     :param verbose: bool, print chi-square test results and mse of frequencies
-    :return: chisquare test result
+    :return: chisquare test result. A p-value higher than 0.05 indicates that the observed frequencies are
+    consistent with the expected frequencies.
     """
     fexp, freqs = get_fexp_freqs(tree_list, graph, root)
 

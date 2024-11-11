@@ -11,7 +11,7 @@ from treesampling.utils.math import StableOp
 
 class WxTable:
     def __init__(self, x: list, graph: nx.DiGraph, log_probs: bool = False, **kwargs):
-        self.log_probs = log_probs
+        self.op = StableOp(log_probs=log_probs)  # dispatch stable operations
         self.x = x
         self.graph = graph
         self.logger = logging.getLogger(self.__class__.__name__)
@@ -33,13 +33,12 @@ class WxTable:
         return self._complete_x
 
     def _build(self) -> dict:
-        op = StableOp(log_probs=self.log_probs)  # dispatch stable operations
         # graph weights
         gw = nx.to_numpy_array(self.graph)
 
         # base step: x = [v] (first node)
         v = self.x[0]
-        wx = {(v, v): op.one()}
+        wx = {(v, v): self.op.one()}
         self.logger.debug(f"\t- Initializing Wx table with node {v}: wx = {wx}")
         for i in range(1, len(self.x)):
             x = self.x[:i]
@@ -47,13 +46,13 @@ class WxTable:
             # Y = X U { u }
             wy = {}
             # compute Ry(u) where u is Y \ X (u)
-            ry_1 = op.zero() # log: -np.inf
+            ry_1 = self.op.zero() # log: -np.inf
             # marginalize over all paths from v to w
             for v, w in itertools.product(x, repeat=2):
-                ry_1 = op.add([ry_1, op.mul([gw[u, v], wx[v, w], gw[w, u]])])
+                ry_1 = self.op.add([ry_1, self.op.mul([gw[u, v], wx[v, w], gw[w, u]])])
                 # log: logaddexp(ry_1, gw[u, v] + wx[v, w] + gw[w, u])
             self.logger.debug(f"\t- Ry(u, 1) for node {u} in Y = {x}: {ry_1}")
-            ry = op.div(op.one(), op.sub(op.one(), ry_1))
+            ry = self.op.div(self.op.one(), self.op.sub(self.op.one(), ry_1))
             # log: -np.log(1 - np.exp(ry_1))
             self.logger.debug(f"\t- Ry(u) for node {u} in Y = {x}: {ry}")
 
@@ -64,21 +63,21 @@ class WxTable:
             wxy = {}
             wyx = {}
             for v in x:
-                wxy[v] = op.zero() # log: -np.inf
-                wyx[v] = op.zero() # log: -np.inf
+                wxy[v] = self.op.zero() # log: -np.inf
+                wyx[v] = self.op.zero() # log: -np.inf
                 for vv in x:
-                    wxy[v] = op.add([wxy[v], op.mul([gw[vv, u], wx[v, vv]])]) # log: logaddexp(wxy[v], gw[vv, u] + wx[v, vv])
-                    wyx[v] = op.add([wyx[v], op.mul([wx[vv, v], gw[u, vv]])]) # log: logaddexp(wyx[v], wx[vv, v] + gw[u, vv])
+                    wxy[v] = self.op.add([wxy[v], self.op.mul([gw[vv, u], wx[v, vv]])]) # log: logaddexp(wxy[v], gw[vv, u] + wx[v, vv])
+                    wyx[v] = self.op.add([wyx[v], self.op.mul([wx[vv, v], gw[u, vv]])]) # log: logaddexp(wyx[v], wx[vv, v] + gw[u, vv])
 
             # write new W table
             for v in x:
-                wy[u, v] = op.mul([ry, wyx[v]]) # log: wy[u, v] = ry + wyx[v]
-                wy[v, u] = op.mul([wxy[v], ry]) # log: wy[v, u] = wxy[v] * ry
+                wy[u, v] = self.op.mul([ry, wyx[v]]) # log: wy[u, v] = ry + wyx[v]
+                wy[v, u] = self.op.mul([wxy[v], ry]) # log: wy[v, u] = wxy[v] * ry
                 self.logger.debug(f"\t- Wy({u}, {v}) = ry({ry}) * wyx({v}) = {wy[u, v]}")
                 self.logger.debug(f"\t- Wy({v}, {u}) = wxy({v}) * ry({ry}) = {wy[v, u]}")
                 for w in x:
                     # general update
-                    wy[v, w] = op.add([wx[v, w], op.mul([wxy[v], ry, wyx[w]])]) # log: wy[v, w] = logaddexp(wx[v, w], wxy[v] + ry + wyx[w])
+                    wy[v, w] = self.op.add([wx[v, w], self.op.mul([wxy[v], ry, wyx[w]])]) # log: wy[v, w] = logaddexp(wx[v, w], wxy[v] + ry + wyx[w])
                     self.logger.debug(f"\t- Wy({v}, {w}) = wx({v}, {w}) + wxy({v}) * ry({ry}) * wyx({w}) = {wy[v, w]}")
             # new self returning random path
             wy[u, u] = ry
@@ -108,12 +107,11 @@ class WxTable:
         assert not np.any([np.isnan(self.wx_dict[k]) for k in self.wx_dict]), f"NaN values in wx table: {self.wx_dict} at node {u}"
 
     def _update_trick(self, u) -> dict:
-        op = StableOp(log_probs=self.log_probs)  # dispatch stable operations
         self.logger.debug(f"\t- Updating Wx table removing node {u} using trick...")
         wx_table = {}
         for (v, w) in self.wx_dict.keys():
             if v != u and w != u:
-                wx_table[v, w] = op.sub(self.wx_dict[v, w], op.div(op.mul([self.wx_dict[v, u], self.wx_dict[u, w]]), self.wx_dict[u, u]))
+                wx_table[v, w] = self.op.sub(self.wx_dict[v, w], self.op.div(self.op.mul([self.wx_dict[v, u], self.wx_dict[u, w]]), self.wx_dict[u, u]))
                 # log: logsubexp(self.wx[v, w], self.wx[v, u] + self.wx[u, w] - self.wx[u, u])
                 self.logger.debug(f"\t- Updated Wx({v}, {w}) = Wx({v}, {w})({self.wx_dict[v, w]})"
                               f" - Wx({v}, {u})({self.wx_dict[v, u]}) * Wx({u}, {w})({self.wx_dict[u, w]}) / Wx({u}, {u})({self.wx_dict[u, u]}) = {wx_table[v, w]}")
@@ -155,6 +153,7 @@ class CastawayRST(TreeSampler):
         :param kwargs: additional arguments
         """
         super().__init__(graph, root, log_probs, **kwargs)
+        self.op = StableOp(log_probs=self.log_probs)
         self.trick = trick
         self._adjust_graph()
         self.logger = logging.getLogger(self.__class__.__name__)
@@ -170,8 +169,7 @@ class CastawayRST(TreeSampler):
     def _adjust_graph(self):
         # add missing edges with null weight and normalize
         missing_edges = nx.difference(nx.complete_graph(self.graph.number_of_nodes()), self.graph)
-        zero_weight = 0. if not self.log_probs else -np.inf
-        self.graph.add_edges_from([(u, v, {'weight': zero_weight}) for u, v in missing_edges.edges()])
+        self.graph.add_edges_from([(u, v, {'weight': self.op.zero()}) for u, v in missing_edges.edges()])
         # normalize graph weights
         self.graph = normalize_graph_weights(self.graph, log_probs=self.log_probs)
 
@@ -263,22 +261,36 @@ class CastawayRST(TreeSampler):
         from any node (u) in the tree or in the x set to the new node i.
         Then sample the next node u proportionally to the computed probabilities.
         :param i: exit node
-        :param tree: nx.DiGraph, current tree
+        :param tree_nodes: list, nodes in the tree
         :return: int, str - u node label and origin ('t' or 'x')
         """
         assert i not in self.wx.x
-        op = StableOp(log_probs=self.log_probs)  # dispatch stable operations
+
+        w_choice, nodes = self._compute_lexit_probs(i, tree_nodes)
+
+        # pick u proportionally to lexit_i(u)
+        u_idx = self.op.random_choice(w_choice) # random choice (if log_probs, uses gumbel trick)
+        u_vertex, origin_lab = nodes[u_idx]
+
+        return u_vertex, origin_lab  # (u, origin) node label and origin ('t' or 'x')
+
+    def _compute_lexit_probs(self, i, tree_nodes) -> tuple[np.ndarray, list]:
+        """
+        Compute the probability of a direct connection from any node (u) in the tree or in the x set to the new node i.
+        :param i: int, exit node
+        :param tree_nodes: list, nodes already in the tree
+        :return: tuple, weights for random choice and list of nodes label and source str ('t' or 'x')
+        """
+        gw = nx.to_numpy_array(self.graph)
         nodes = []  # tuples (node, source) - source can be 'x' or 't'
         w_choice = []  # weights for random choice at each node
-        gw = nx.to_numpy_array(self.graph)
 
         # probability of any u in V(T) U X to be the next connection to i
         # attachment from tree to any node in X
         pattach = {}  # for each v in X, gives sum_{w in T} p(w, v)
         # O(n^2)
         for v in self.wx.x:
-            pattach[v] = op.add([gw[w, v] for w in tree_nodes])
-
+            pattach[v] = self.op.add([gw[w, v] for w in tree_nodes])
         # for tree nodes as origin, probability is barely the weight of the arc
         for u in tree_nodes:
             nodes.append((u, 't'))
@@ -288,16 +300,12 @@ class CastawayRST(TreeSampler):
         for u in self.wx.x:
             # lexit_i(u) = (sum_{v in X} (sum_{w in T} Ww,v) * Wv,u ) * p(u, i)
             # any w, v (from tree to X) * any v, u (from X to i) * p(u, i)
-            p_tree_u_i = op.mul([op.add([op.mul([pattach[v], self.wx.wx_dict[v, u]]) for v in self.wx.x]), gw[u, i]])
+            p_tree_u_i = self.op.mul(
+                [self.op.add([self.op.mul([pattach[v], self.wx.wx_dict[v, u]]) for v in self.wx.x]), gw[u, i]])
             nodes.append((u, 'x'))
             w_choice.append(p_tree_u_i)
-        w_choice = op.normalize(w_choice)
-
-        # pick u proportionally to lexit_i(u)
-        u_idx = op.random_choice(w_choice) # random choice (if log_probs, uses gumbel trick)
-        u_vertex, origin_lab = nodes[u_idx]
-
-        return u_vertex, origin_lab  # (u, origin) node label and origin ('t' or 'x')
+        w_choice = self.op.normalize(w_choice)
+        return w_choice, nodes
 
 
 if __name__ == '__main__':
