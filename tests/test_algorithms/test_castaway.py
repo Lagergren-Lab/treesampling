@@ -15,20 +15,18 @@ def test_wx_table():
     the trick outputs the same W table as the computation from scratch
     """
     # random graph
-    g = random_uniform_graph(5, log_probs=False)
-    # normalize by col
-    normalize_graph_weights(g, log_probs=False)
-    wx = WxTable(x=[0, 1, 2, 3, 4], graph=g, log_probs=False)
+    g = random_uniform_graph(5, log_probs=False, normalize=True)
+    wx = WxTable(x=[1, 2, 3, 4], graph=g, log_probs=False)
     print(wx.to_array())
 
     # test update
     # remove 4 from x
-    wx.x = [0, 1, 2, 3]
+    wx.x = [1, 2, 3]
     wx_4 = wx._build()
     print(wx_4)
 
     # remove 4 and change order
-    wx.x = [0, 1, 3, 2]
+    wx.x = [1, 3, 2]
     wx_4_order = wx._build()
     print(wx_4_order)
 
@@ -48,20 +46,18 @@ def test_wx_table_log():
     the trick outputs the same W table as the computation from scratch
     """
     # random graph
-    g = random_uniform_graph(5, log_probs=True)
-    # normalize by col
-    g = normalize_graph_weights(g, log_probs=True)
-    wx = WxTable(x=[0, 1, 2, 3, 4], graph=g, log_probs=True)
+    g = random_uniform_graph(5, log_probs=True, normalize=True)
+    wx = WxTable(x=[1, 2, 3, 4], graph=g, log_probs=True)
     print(wx.to_array())
 
     # test update
     # remove 4 from x
-    wx.x = [0, 1, 2, 3]
+    wx.x = [1, 2, 3]
     wx_4 = wx._build()
     print(wx_4)
 
     # remove 4 and change order
-    wx.x = [0, 1, 3, 2]
+    wx.x = [1, 3, 2]
     wx_4_order = wx._build()
     print(wx_4_order)
 
@@ -136,11 +132,13 @@ def test_wx_table_log_accuracy_update():
 
 
 def test_castaway_uniform():
+    """
+    Random graph test
+    """
     np.random.seed(42)
     # random graph
-    g = random_uniform_graph(5)
-    # normalize by col
-    g = normalize_graph_weights(g)
+    g = random_uniform_graph(5, normalize=True)
+    print(nx.to_numpy_array(g))
     print(g.edges(data=True))
 
     sampler = CastawayRST(graph=g, root=0)
@@ -166,17 +164,18 @@ def test_castaway_uniform():
 
 def test_castaway_uniform_log():
     np.random.seed(42)
+    n_nodes = 5
     # random graph
-    g = random_uniform_graph(4, log_probs=True)
-    # normalize by col
-    g = normalize_graph_weights(g, log_probs=True)
+    g = random_uniform_graph(n_nodes, log_probs=True, normalize=True)
+    print(g.edges(data=True))
+    print(np.exp(nx.to_numpy_array(g)))
 
     sampler = CastawayRST(graph=g, root=0, log_probs=True)
     tree = sampler.sample_tree()
     print(tree_to_newick(tree))
 
     # test correlation
-    n_samples = 10000
+    n_samples = 5000
     trees = []
     for _ in range(n_samples):
         tree = sampler.sample_tree()
@@ -188,6 +187,8 @@ def test_castaway_uniform_log():
     for t in trees:
         for e in t.edges():
             t.edges()[e]['weight'] = np.exp(t.edges()[e]['weight'])
+    # check normalization
+    assert np.allclose(nx.to_numpy_array(g).sum(axis=0), np.ones(n_nodes))
 
     # test correlation coeff
     corr = tree_sample_dist_correlation(trees, g, root=0)

@@ -54,7 +54,7 @@ def test_edge_contraction():
     sample_size = 5000
     tree_proportion_with_e = 0
     for s in range(sample_size):
-        tree = ta.castaway_rst(graph, root=0)
+        tree = ta.random_spanning_tree(graph, root=0)
         if e in tree.edges:
             tree_proportion_with_e += 1
     tree_proportion_with_e /= sample_size
@@ -120,7 +120,7 @@ def test_kirchhoff_tot_weight():
     ss = 1000
     sample = {}
     for s in range(ss):
-        tree = ta.castaway_rst(graph, root=0)
+        tree = ta.random_spanning_tree(graph, root=0)
         tree_nwk = tree_to_newick(tree)
         if tree_nwk not in sample:
             sample[tree_nwk] = 1

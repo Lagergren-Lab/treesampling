@@ -116,6 +116,8 @@ def random_tree_skewed_graph(n_nodes, skewness, root: int | None = None) -> tupl
 
 def normalize_graph_weights(graph, log_probs=False, rowwise=False) -> nx.DiGraph:
     adj_mat = nx.to_numpy_array(graph)
+    # if no self loops in graph, set diagonal to -inf
+    np.fill_diagonal(adj_mat, 0 if not log_probs else -np.inf)
     axis = 1 if rowwise else 0
     if not log_probs:
         adj_mat = adj_mat / adj_mat.sum(axis=axis, keepdims=True)

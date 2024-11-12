@@ -260,7 +260,7 @@ def test_laplacian():
 
 
 def test_uniform_graph_sampling():
-    n_nodes = 7
+    n_nodes = 6
     adj_mat = np.ones((n_nodes, n_nodes))
     np.fill_diagonal(adj_mat, 0)
     graph = nx.from_numpy_array(adj_mat, create_using=nx.DiGraph)

@@ -8,6 +8,7 @@ def test_stable_op_random_choice():
     Check that the random choice function from the class StableOp
     outputs the same results in log scale and in linear scale
     """
+    np.random.seed(0)
     so = StableOp(log_probs=False)
     so_log = StableOp(log_probs=True)
     arr = np.array([0.1, 0.2, 0.3, 0.4])

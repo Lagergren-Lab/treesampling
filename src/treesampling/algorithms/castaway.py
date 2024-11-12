@@ -128,6 +128,16 @@ class WxTable:
         self.x = self.complete_x.copy()
         self.wx_dict = self._complete_table.copy()
 
+    def to_log_array(self):
+        """
+        Return the Wx table as a numpy array in log scale, leaving 0 values as 0 instead of - inf
+        """
+        wxarr = self.to_array()
+        wxarr[wxarr == 0] = 1
+        return np.log(wxarr)
+
+
+
 def wx_dict_to_array(wx_dict: dict, n_nodes: int) -> np.ndarray:
     """
     Convert a Wx dictionary to a numpy array. Nodes that are not in the table are set to 0.
