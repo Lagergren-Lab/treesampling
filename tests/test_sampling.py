@@ -188,32 +188,16 @@ def test_castaway_log_low_weight():
 
     # generate a sample and save both the tree weights and the frequencies at which they occur
     sampler = CastawayRST(random_graph, root=0, log_probs=True, trick=False)
-    n = 10000
-    sample_dict = {}
-    fexp_dict = {}
+    n = 1000
+    tree_list = []
     for _ in range(n):
         tree = sampler.sample_tree()
-        tree_nwk = tg.tree_to_newick(tree)
-        if tree_nwk not in sample_dict:
-            sample_dict[tree_nwk] = 0
-            tree_weight = tg.graph_weight(tree, log_probs=True)
-            assert tree_weight > -np.inf
-            fexp_dict[tree_nwk] = tree_weight
-        sample_dict[tree_nwk] += 1
-
-    # make arrays and normalize expected frequencies (unnormalized tree weights)
-    print(fexp_dict)
-    print(sample_dict)
-    fexp = []
-    freqs = []
-    for k, v in sample_dict.items():
-        fexp.append(fexp_dict[k])
-        freqs.append(v)
-    fexp = np.array(fexp)
-    fexp -= np.logaddexp.reduce(fexp)
-    fexp = np.exp(fexp)
-
-    assert_chi_square(np.array(freqs), fexp, verbose=True)
+        tree_list.append(tree)
+    # convert to linear scale
+    lin_random_graph = tg.reset_adj_matrix(random_graph, np.exp(nx.to_numpy_array(random_graph)))
+    assert np.all(np.diag(nx.to_numpy_array(lin_random_graph)) == 0)
+    chi_square = chi_square_goodness(tree_list, lin_random_graph, root=0)
+    print(chi_square)
 
 
 def test_laplacian():

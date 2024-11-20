@@ -1,9 +1,11 @@
-from random import random
-
+"""
+This experiment tests that the sampling of trees with the Castaway algorithm is consistent between the plain and log
+versions of the algorithm. The experiment generates a random graph and samples trees with the Castaway algorithm in both
+plain and log versions, checking that all the probability tables computed at each step are equal.
+"""
 import networkx as nx
 import numpy as np
 
-from treesampling.algorithms import CastawayRST
 from treesampling.algorithms.castaway import WxTable
 from treesampling.utils.graphs import tree_to_newick, reset_adj_matrix, random_uniform_graph, normalize_graph_weights, \
     tuttes_tot_weight, graph_weight, enumerate_rooted_trees
@@ -88,16 +90,16 @@ def sample_tree_pair(graph: nx.DiGraph, root: int, n_nodes: int, seed: int | Non
         # pick u proportionally to lexit_i(u)
         assert np.allclose(w_choice, np.exp(w_choice_log)), f"weights: {w_choice} != {np.exp(w_choice_log)}"
         # control random seed
-        np.random.seed(seed)
+        # np.random.seed(seed)
+        # NOTE: if seed is reset every time, the random choice will not follow the right distribution
+        #      This line is the same for both versions and assumes that, given the same w_choice and seed,
+        #      the random choice will be the same (this is indeed tested already in the StableOp tests)
         u_idx = wxp.op.random_choice(w_choice) # random choice (if log_probs, uses gumbel trick)
-        np.random.seed(seed)
-        u_idx_log = wxp.op.random_choice(np.exp(w_choice_log))  # !!! this is the only difference
-        assert u_idx == u_idx_log, f"u_idx: {u_idx} != {u_idx_log}"
 
         u_vertex, origin_lab = nodes[u_idx]
 
         dpp.append((u_vertex, i_vertex, graph.edges()[u_vertex, i_vertex]['weight']))
-        dpl.append((nodes_log[u_idx_log][0], i_vertex, graph.edges()[nodes_log[u_idx_log][0], i_vertex]['weight']))
+        dpl.append((nodes_log[u_idx][0], i_vertex, graph.edges()[nodes_log[u_idx][0], i_vertex]['weight']))
         if origin_lab == 't':
             tp.add_weighted_edges_from(dpp)
             tl.add_weighted_edges_from(dpl)
