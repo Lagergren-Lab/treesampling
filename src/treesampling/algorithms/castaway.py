@@ -165,13 +165,13 @@ class CastawayRST(TreeSampler):
         super().__init__(graph, root, log_probs, **kwargs)
         self.op = StableOp(log_probs=self.log_probs)
         self.trick = trick
-        self._adjust_graph()
         self.logger = logging.getLogger(self.__class__.__name__)
         self.logger.setLevel(logging.INFO)
         self.debug = kwargs.get('debug', False)
         if self.debug:
             self.logger.setLevel(logging.DEBUG)
 
+        self._adjust_graph()
         # initialize x set to all nodes except the root
         self.x_list = list(set(self.graph.nodes()).difference([self.root]))
         self.wx = WxTable(self.x_list, self.graph, log_probs=self.log_probs, debug=self.debug)
@@ -180,8 +180,24 @@ class CastawayRST(TreeSampler):
         # add missing edges with null weight and normalize
         missing_edges = nx.difference(nx.complete_graph(self.graph.number_of_nodes()), self.graph)
         self.graph.add_edges_from([(u, v, {'weight': self.op.zero()}) for u, v in missing_edges.edges()])
+        not_normalized = False
+        # if weights are normalized, check for forced edges with weight 1
+        for i in range(self.graph.number_of_nodes()):
+            # when sum is close to one, and one single edge has weight 1, then
+            # all other edges should never be sampled (set their weight to 0)
+            if np.isclose(self.op.add(nx.to_numpy_array(self.graph)[:, i].tolist()), self.op.one()):
+                # check whether there is a node with weight 1.
+                if np.any(np.isclose(nx.to_numpy_array(self.graph)[:, i], self.op.one())):
+                    j = np.argwhere(np.isclose(nx.to_numpy_array(self.graph)[:, i], self.op.one()))[0]
+                    self.logger.warning(f"edge {j} -> {i} has weight 1.0, all other edges in node {i} will be set to 0.")
+                    for k in range(self.graph.number_of_nodes()):
+                        if k != j:
+                            self.graph.edges()[k, i]['weight'] = self.op.zero()
+            else:
+                not_normalized = True
         # normalize graph weights
-        self.graph = normalize_graph_weights(self.graph, log_probs=self.log_probs)
+        if not_normalized:
+            self.graph = normalize_graph_weights(self.graph, log_probs=self.log_probs)
 
     def sample(self, n_samples: int = 1) -> dict:
         """
@@ -281,6 +297,7 @@ class CastawayRST(TreeSampler):
         # pick u proportionally to lexit_i(u)
         u_idx = self.op.random_choice(w_choice) # random choice (if log_probs, uses gumbel trick)
         u_vertex, origin_lab = nodes[u_idx]
+        self.logger.debug(f"- Picking node u = {u_vertex} from w_choice: {w_choice} (origin: {origin_lab})")
 
         return u_vertex, origin_lab  # (u, origin) node label and origin ('t' or 'x')
 
@@ -314,13 +331,13 @@ class CastawayRST(TreeSampler):
                 [self.op.add([self.op.mul([pattach[v], self.wx.wx_dict[v, u]]) for v in self.wx.x]), gw[u, i]])
             nodes.append((u, 'x'))
             w_choice.append(p_tree_u_i)
+        # print(f"unnormalized choices:{w_choice} {nodes}, i: {i}")
         w_choice = self.op.normalize(w_choice)
         return w_choice, nodes
 
 
 if __name__ == '__main__':
     # debug algorithm steps
-    logging.basicConfig(level=logging.DEBUG)
     np.random.seed(42)
     # random graph
     g = random_uniform_graph(5, log_probs=False, normalize=True)

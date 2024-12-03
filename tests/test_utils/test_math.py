@@ -37,5 +37,19 @@ def test_stable_op_random_choice():
     print(rnd_test.pvalue)
     assert rnd_test.pvalue < 0.05
 
+def test_log_normalization_stability():
+    """
+    Issue description: when normalizing, if one weight is much larger than the rest, it will
+      be set to 0 while the rest is still > - inf
+    Question to answer: what is the imbalance magnitude that starts causing this issue?
+    """
+    # check when normalization results in saturated prob to 1. (log prob to 0.)
+    op = StableOp(log_probs=True)
+    # imbalance between log probs
+    for imb in [-1, -10, -15, -20, -50, -100, -200]:
+        array = np.array([-np.inf, -0.1, imb, imb, imb, imb])
+        norm_arr = op.normalize(array)
+        print(norm_arr)
+
 
 

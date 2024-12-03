@@ -4,6 +4,8 @@ from functools import reduce
 import numpy as np
 import networkx as nx
 
+from treesampling.utils.math import StableOp
+
 
 # copied from VICTree
 def tree_to_newick(g: nx.DiGraph, root=None, weight=None):
@@ -90,6 +92,34 @@ def random_weakly_connected_graph(n_nodes, log_probs=False, weak_weight=1e-3) ->
     graph = reset_adj_matrix(graph, weights)
     return graph
 
+def random_weakly_connected_k_subgraphs(n_nodes, k: int = 2, log_probs=False, weak_weight=1e-3,
+                                        normalized: bool = True) -> nx.DiGraph:
+    op = StableOp(log_probs)
+    graph = nx.DiGraph()
+    weights = np.random.random((n_nodes, n_nodes))
+    if log_probs:
+        weights = np.log(weights)
+
+    # divide nodes into k components
+    nodes_per_component = n_nodes // k
+    components = [i // nodes_per_component for i in range(nodes_per_component * k)]
+    # fill remaining nodes with last component
+    components = components + [k - 1] * (n_nodes - len(components))
+    # assign lower weight to arcs between components
+    for i in range(n_nodes):
+        for j in range(n_nodes):
+            # set low weight for arcs between components
+            if components[i] != components[j]:
+                weights[i, j] = op.mul([weights[i, j], weak_weight])
+    # remove self connections
+    np.fill_diagonal(weights, op.zero())
+    # reset graph with new weights
+    graph = reset_adj_matrix(graph, weights)
+    # normalize graph weights
+    if normalized:
+        graph = normalize_graph_weights(graph, log_probs=log_probs)
+    return graph
+
 
 def random_tree_skewed_graph(n_nodes, skewness, root: int | None = None) -> tuple[nx.DiGraph, nx.DiGraph]:
     """
@@ -115,15 +145,20 @@ def random_tree_skewed_graph(n_nodes, skewness, root: int | None = None) -> tupl
 
 
 def normalize_graph_weights(graph, log_probs=False, rowwise=False) -> nx.DiGraph:
+    """
+    Normalize graph weights to sum to 1.
+    :param graph: nx.DiGraph with weights
+    :param log_probs: if True, weights are log probabilities
+    :param rowwise: if True, normalize rowwise (axis=1), default is columnwise (axis=0) i.e. in-edges sum to 1
+    :return: copy of graph with normalized weights (self loops set to 0)
+    """
+    op = StableOp(log_probs)
     adj_mat = nx.to_numpy_array(graph)
     # if no self loops in graph, set diagonal to -inf
-    np.fill_diagonal(adj_mat, 0 if not log_probs else -np.inf)
+    adj_mat[np.eye(adj_mat.shape[0], dtype=bool)] = op.zero()
     axis = 1 if rowwise else 0
-    if not log_probs:
-        adj_mat = adj_mat / adj_mat.sum(axis=axis, keepdims=True)
-    else:
-        adj_mat = adj_mat - np.logaddexp.reduce(adj_mat, axis=axis, keepdims=True)
-    norm_graph = reset_adj_matrix(graph, adj_mat)
+    norm_adj_mat = op.normalize(adj_mat, axis=axis)
+    norm_graph = reset_adj_matrix(graph, norm_adj_mat)
     return norm_graph
 
 

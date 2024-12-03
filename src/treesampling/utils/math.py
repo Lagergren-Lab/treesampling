@@ -1,4 +1,5 @@
 import numpy as np
+import scipy.special as sp
 import numpy.linalg as la
 
 class StableOp:
@@ -42,11 +43,11 @@ class StableOp:
         else:
             return np.random.choice(arr.size, p=arr)
 
-    def normalize(self, arr):
+    def normalize(self, arr, axis=None):
         if self.log_probs:
-            return arr - np.logaddexp.reduce(arr)
+            return arr - sp.logsumexp(arr, axis=axis, keepdims=True)
         else:
-            return arr / np.sum(arr)
+            return arr / np.sum(arr, axis=axis, keepdims=True)
 
 
 def logdiffexp(l1, l2):
@@ -71,8 +72,8 @@ def logdiffexp(l1, l2):
 
 def gumbel_max_trick_sample(log_probs: np.ndarray) -> int:
     # check that input log probs are normalized
-    assert np.isclose(np.logaddexp.reduce(log_probs), 0.0), (f"sum of log probs should be 0.0, but is "
-                                                             f": {np.logaddexp.reduce(log_probs)}")
+    assert np.isclose(sp.logsumexp(log_probs), 0.0), (f"sum of log probs should be 0.0, but is "
+                                                             f": {sp.logsumexp(log_probs)}")
     gumbels = np.random.gumbel(size=len(log_probs))
     sample = np.argmax(log_probs + gumbels)
     return sample

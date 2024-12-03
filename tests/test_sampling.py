@@ -1,12 +1,10 @@
-import logging
-from random import sample
-
 import h5py
 import numpy as np
 import networkx as nx
 import itertools
 
 from scipy.stats import chisquare
+import scipy.special as sp
 
 from treesampling import algorithms
 import treesampling.utils.graphs as tg
@@ -48,7 +46,7 @@ def chi_square_goodness(tree_list, graph, root, verbose: bool = False) -> chisqu
     test_result = chisquare(f_obs=freqs, f_exp=fexp)
     if verbose:
         print(f"freqs_dict mse: {np.sum((freqs / freqs.sum() - fexp / fexp.sum()) ** 2)}")
-        print(f"p-val {test_result}")
+        print(f"p-val {test_result.pvalue}")
     return test_result
 
 def get_fexp_freqs(tree_list, graph, root=0) -> (np.array, np.array):
@@ -167,37 +165,6 @@ def test_castaway_low_weight():
         assert nx.is_arborescence(tree)
 
 
-def test_castaway_log_low_weight():
-    """
-    This test was built to debug numerical instability in the castaway algorithm. Log-prob version.
-    """
-    np.random.seed(0)
-    n_nodes = 5
-    low_weight = 1e-19
-    random_graph = tg.random_weakly_connected_graph(n_nodes, weak_weight=low_weight, log_probs=True)
-    assert np.all(nx.to_numpy_array(random_graph) < 0)
-    assert np.all(nx.to_numpy_array(random_graph)[np.eye(n_nodes, dtype=bool)] == -np.inf)
-    assert np.all(nx.to_numpy_array(random_graph)[~np.eye(n_nodes, dtype=bool)] > -np.inf)
-    print(nx.to_numpy_array(random_graph))
-    # sort edges by weight in increasing order without including self connections
-    # in order to check which weak connections are most likely to be sampled
-    edges = sorted(random_graph.edges(data=True), key=lambda e: e[2]['weight'])
-    for e in edges:
-        if e[0] != e[1]:
-            print(f"{e[0]} -> {e[1]}: {e[2]['weight']}")
-
-    # generate a sample and save both the tree weights and the frequencies at which they occur
-    sampler = CastawayRST(random_graph, root=0, log_probs=True, trick=False)
-    n = 1000
-    tree_list = []
-    for _ in range(n):
-        tree = sampler.sample_tree()
-        tree_list.append(tree)
-    # convert to linear scale
-    lin_random_graph = tg.reset_adj_matrix(random_graph, np.exp(nx.to_numpy_array(random_graph)))
-    assert np.all(np.diag(nx.to_numpy_array(lin_random_graph)) == 0)
-    chi_square = chi_square_goodness(tree_list, lin_random_graph, root=0)
-    print(chi_square)
 
 
 def test_laplacian():
@@ -320,14 +287,17 @@ def test_victree_output():
             graph_matrix[u, v] = -np.inf
     graph = tg.reset_adj_matrix(graph, graph_matrix)
     graph = tg.normalize_graph_weights(graph, log_probs=True)
-    exp_weights = np.exp(nx.to_numpy_array(graph))
+    assert np.all(np.isclose(sp.logsumexp(nx.to_numpy_array(graph), axis=0), 0.)), "not normalized"
+    assert np.all(nx.to_numpy_array(graph) < 0), "graph weights are either not log probs or not negative"
+
+    # exp_weights = np.exp(nx.to_numpy_array(graph))
     # NOTE: weights are clamped so to avoid instabilities
     # exp_weights = np.clip(exp_weights, a_min=1e-50, a_max=1.)
     # FIXME: check that it works with trick
-    graph = tg.reset_adj_matrix(graph, exp_weights)
-    graph = tg.normalize_graph_weights(graph)
+    # graph = tg.reset_adj_matrix(graph, exp_weights)
+    # graph = tg.normalize_graph_weights(graph)
     ss = 100
-    smplr = CastawayRST(graph, root=0, log_probs=False, trick=False)
+    smplr = CastawayRST(graph, root=0, log_probs=True, trick=True)
     sample = smplr.sample(ss)
 
     print(sample)
