@@ -11,14 +11,14 @@ from treesampling.utils.graphs import random_uniform_graph, normalize_graph_weig
 from warnings import warn
 
 
-def random_spanning_tree(graph: nx.DiGraph, root=0) -> nx.DiGraph:
-    smplr = CastawayRST(graph, root, log_probs=False)
+def random_spanning_tree(graph: nx.DiGraph, root=0, trick: bool = True) -> nx.DiGraph:
+    smplr = CastawayRST(graph, root, log_probs=False, trick=trick)
     warn('Use the new object ' + smplr.__class__.__name__ + ' with log_probs=False', DeprecationWarning, stacklevel=2)
     return smplr.sample_tree()
 
 
-def random_spanning_tree_log(graph: nx.DiGraph, root=0) -> nx.DiGraph:
-    smplr = CastawayRST(graph, root, log_probs=True)
+def random_spanning_tree_log(graph: nx.DiGraph, root=0, trick: bool = True) -> nx.DiGraph:
+    smplr = CastawayRST(graph, root, log_probs=True, trick=trick)
     warn('Use the new object ' + smplr.__class__.__name__ + ' with log_probs=True', DeprecationWarning, stacklevel=2)
     return smplr.sample_tree()
 
@@ -223,7 +223,7 @@ if __name__ == '__main__':
     root = 1
     for n_nodes in [8, 9, 10]:
         trees_sample = {}
-        graph = random_uniform_graph(n_nodes)
+        graph = random_uniform_graph(n_nodes, normalize=True)
         sample_size = 500
 
         # our vs wilson: uniform graph

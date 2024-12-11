@@ -152,7 +152,7 @@ def wx_dict_to_array(wx_dict: dict, n_nodes: int) -> np.ndarray:
 
 class CastawayRST(TreeSampler):
 
-    def __init__(self, graph: nx.DiGraph, root: int, log_probs: bool = False, trick: bool = False, **kwargs):
+    def __init__(self, graph: nx.DiGraph, root: int, log_probs: bool = False, trick: bool = True, **kwargs):
         """
         Initialize the Castaway Random Spanning Tree sampler.
         :param graph: nx.DiGraph with weights on arcs

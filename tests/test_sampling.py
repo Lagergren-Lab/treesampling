@@ -95,7 +95,7 @@ def get_fexp_freqs(tree_list, graph, root=0) -> (np.array, np.array):
 
 
 def test_log_random_uniform_graph():
-    log_graph = tg.random_uniform_graph(5, log_probs=True)
+    log_graph = tg.random_uniform_graph(5, log_probs=True, normalize=True)
     weight_matrix = nx.to_numpy_array(log_graph)
     # all weights except diagonals are < 0
     diag_mask = np.eye(weight_matrix.shape[0], dtype=bool)
@@ -549,7 +549,7 @@ def test_castaway_uncomplete_graph():
     n_samples = 100
     for log_probs in [True, False]:
         print(f"--- log_probs: {log_probs} ---")
-        graph = tg.random_uniform_graph(n_nodes, log_probs=log_probs)
+        graph = tg.random_uniform_graph(n_nodes, log_probs=log_probs, normalize=True)
         removed_arcs = [(0, 1), (1, 2), (2, 3), (3, 4)]
         for arc in removed_arcs:
             graph.remove_edge(*arc)

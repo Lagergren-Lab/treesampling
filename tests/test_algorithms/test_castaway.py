@@ -282,7 +282,7 @@ def test_lexit_probs():
     """
     np.random.seed(42)
     # random graph
-    g = tg.random_uniform_graph(6, log_probs=False)
+    g = tg.random_uniform_graph(6, log_probs=False, normalize=True)
     sampler = CastawayRST(graph=g, root=0, log_probs=False)
     log_g = tg.reset_adj_matrix(g, np.log(nx.to_numpy_array(g)))
     log_sampler = CastawayRST(graph=log_g, root=0, log_probs=True)

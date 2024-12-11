@@ -120,6 +120,47 @@ def random_weakly_connected_k_subgraphs(n_nodes, k: int = 2, log_probs=False, we
         graph = normalize_graph_weights(graph, log_probs=log_probs)
     return graph
 
+def random_block_matrix_graph(n_nodes: int, n_blocks: int = 2, log_probs: bool = False, p: float = 0.5,
+                              symmetric: bool = True) -> nx.DiGraph:
+    """
+    Generate a random block matrix graph with random weights drawn from uniform distribution [0, 1] and connections
+    between blocks drawn from Bernoulli distribution with parameter p.
+    :param n_nodes: int, number of nodes
+    :param n_blocks: int, number of blocks
+    :param log_probs: bool, if True, weights are log probabilities
+    :param p: float, probability of connection between blocks
+    :param symmetric: bool, if True, the graph matrix is symmetric
+    :return: nx.DiGraph with block matrix structure
+    """
+
+    op = StableOp(log_probs)
+    graph = nx.DiGraph()
+    weights = np.random.random((n_nodes, n_nodes))
+    if log_probs:
+        weights = np.log(weights)
+
+    # divide nodes into k components
+    nodes_per_component = n_nodes // n_blocks
+    components = [i // nodes_per_component for i in range(nodes_per_component * n_blocks)]
+    # fill remaining nodes with last component
+    components = components + [n_blocks - 1] * (n_nodes - len(components))
+    # assign lower weight to arcs between components
+    for i in range(n_nodes):
+        for j in range(n_nodes):
+            if symmetric and i > j:
+                weights[i, j] = weights[j, i]
+            # set low weight for arcs between components
+            elif components[i] != components[j]:
+                random_flip = op.one() if np.random.random() < p else op.zero()
+                weights[i, j] = op.mul([weights[i, j], random_flip])
+    # remove self connections
+    np.fill_diagonal(weights, op.zero())
+    # reset graph with new weights
+    graph = reset_adj_matrix(graph, weights)
+    # normalize graph weights
+    graph = normalize_graph_weights(graph, log_probs=log_probs)
+    return graph
+
 
 def random_tree_skewed_graph(n_nodes, skewness, root: int | None = None) -> tuple[nx.DiGraph, nx.DiGraph]:
     """
