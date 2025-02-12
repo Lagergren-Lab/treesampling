@@ -6,7 +6,7 @@ from treesampling.algorithms import CastawayRST
 from treesampling.algorithms.castaway import WxTable
 import treesampling.utils.graphs as tg
 from tests.test_sampling import chi_square_goodness, tree_sample_dist_correlation
-from treesampling.utils.graphs import normalize_graph_weights
+from treesampling.utils.graphs import normalize_graph_weights, random_tree_skewed_graph
 
 
 def test_wx_table():
@@ -397,3 +397,27 @@ def test_castaway_log_low_weight():
     # convert to linear scale
     lin_random_graph = tg.reset_adj_matrix(random_graph, np.exp(nx.to_numpy_array(random_graph)))
     assert np.all(np.diag(nx.to_numpy_array(lin_random_graph)) == 0)
+
+def test_caching():
+    # test caching
+    # cache size should constrain cache_tables dict size
+    n_nodes = 15
+    cache_size = 10
+    graph = random_tree_skewed_graph(n_nodes, 5, root=0)[0]
+    sampler = CastawayRST(graph, root=0, log_probs=True, trick=True, debug=True, cache_size=10)
+    n = 100
+    cache_hits = {}
+    for _ in range(n):
+        sampler.sample_tree()
+
+        # check that the hit counts doesn't reset (monotonic increase)
+        for k, v in sampler.wx._cache_hits.items():
+            if k in cache_hits:
+                assert v >= cache_hits[k]
+            cache_hits[k] = v
+
+        # check that tables are also in the "hits" dict
+        for k in sampler.wx._cached_tables:
+            assert k in cache_hits
+
+        assert len(sampler.wx._cached_tables) <= cache_size

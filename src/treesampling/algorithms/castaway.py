@@ -10,16 +10,22 @@ from treesampling.utils.math import StableOp
 
 
 class WxTable:
-    def __init__(self, x: list, graph: nx.DiGraph, log_probs: bool = False, **kwargs):
+    def __init__(self, x: list, graph: nx.DiGraph, log_probs: bool = False, cache_size: int = 1, **kwargs):
         self.op = StableOp(log_probs=log_probs)  # dispatch stable operations
         self.x = x
         self.graph = graph
         self.logger = logging.getLogger(self.__class__.__name__)
         self.logger.setLevel(logging.INFO)
         self.debug = kwargs.get('debug', False)
+        self.cache_size = cache_size
         if self.debug:
             self.logger.setLevel(logging.DEBUG)
 
+        # cache which stores the computed tables and the amount of calls to the cache (hits)
+        # this is useful to avoid recomputing the same table multiple times when graph weights are not updated and
+        # there are recurrent x sets
+        self._cache_hits = {}
+        self._cached_tables = {}
         self.wx_dict = self._build()
         self._complete_x = self.x.copy()
         self._complete_table = self.wx_dict.copy()
@@ -86,6 +92,8 @@ class WxTable:
             # update wx
             wx = wy
             self.logger.debug(f"\t- Updated Wx table with node {u}")
+
+            self._update_cache(wx, x)
         return wx
 
     def update(self, u, trick=False):
@@ -97,8 +105,14 @@ class WxTable:
         """
         assert u in self.x, f"Node {u} not in x set prior to removal and update"
         self.x = [v for v in self.x if v != u]
+
+        x_tuple = tuple(sorted(self.x))
         if not self.x:
             self.wx_dict = {}
+        elif self.cache_size > 1 and x_tuple in self._cached_tables:
+            # TODO: test this
+            self.wx_dict = self._cached_tables[x_tuple]
+            self._cache_hits[x_tuple] += 1
         elif trick:
             self.wx_dict = self._update_trick(u)
         else:
@@ -115,6 +129,9 @@ class WxTable:
                 # log: logsubexp(self.wx[v, w], self.wx[v, u] + self.wx[u, w] - self.wx[u, u])
                 self.logger.debug(f"\t- Updated Wx({v}, {w}) = Wx({v}, {w})({self.wx_dict[v, w]})"
                               f" - Wx({v}, {u})({self.wx_dict[v, u]}) * Wx({u}, {w})({self.wx_dict[u, w]}) / Wx({u}, {u})({self.wx_dict[u, u]}) = {wx_table[v, w]}")
+
+        if self.cache_size > 1:
+            self._update_cache(wx_table, self.x)
         return wx_table
 
     def get_wx(self):
@@ -136,6 +153,32 @@ class WxTable:
         wxarr[wxarr == 0] = 1
         return np.log(wxarr)
 
+    def _update_cache(self, wx, x):
+        """
+        Update the cache with the new Wx table and the current x set.
+        :param wx: dict, new Wx table
+        :param x: list, current x set
+        """
+        x = tuple(sorted(x))
+        if x in self._cached_tables:
+            self._cache_hits[x] += 1
+        elif len(self._cached_tables) < self.cache_size:
+            assert x not in self._cached_tables, f"Cache already contains x set {x}"
+            self._cached_tables[x] = wx
+            self._cache_hits[x] = 1
+        else:
+            # replace least used cache if cache is full and new x set occurred more times than the least used cache
+            # check least used cached tables and check x hits
+            min_cached = min(self._cached_tables, key=lambda k: self._cache_hits[k])
+            x_hits = self._cache_hits.get(x, 0) + 1
+            min_hits = self._cache_hits[min_cached]
+            # if x has more hits than the least used cache, replace the least used cache
+            if x_hits > min_hits:
+                del self._cached_tables[min_cached]
+                self._cached_tables[x] = wx
+
+            # update hits regardless of the cache update so that eventually the least used cache is replaced
+            self._cache_hits[x] = x_hits
 
 
 def wx_dict_to_array(wx_dict: dict, n_nodes: int) -> np.ndarray:
@@ -174,7 +217,7 @@ class CastawayRST(TreeSampler):
         self._adjust_graph()
         # initialize x set to all nodes except the root
         self.x_list = list(set(self.graph.nodes()).difference([self.root]))
-        self.wx = WxTable(self.x_list, self.graph, log_probs=self.log_probs, debug=self.debug)
+        self.wx = WxTable(self.x_list, self.graph, log_probs=self.log_probs, debug=self.debug, cache_size=kwargs.get('cache_size', 1))
 
     def _adjust_graph(self):
         # add missing edges with null weight and normalize
