@@ -3,6 +3,8 @@ import networkx as nx
 import numpy as np
 
 from treesampling.algorithms.castaway import CastawayRST
+from treesampling.algorithms.castaway_legacy import random_spanning_tree_log as legacy_rst_log
+from treesampling.algorithms.castaway_legacy import random_spanning_tree as legacy_rst
 
 from treesampling.utils.math import gumbel_max_trick_sample
 from treesampling.utils.graphs import graph_weight, tuttes_tot_weight, reset_adj_matrix
@@ -12,15 +14,25 @@ from warnings import warn
 
 
 def random_spanning_tree(graph: nx.DiGraph, root=0, trick: bool = True) -> nx.DiGraph:
-    smplr = CastawayRST(graph, root, log_probs=False, trick=trick)
-    warn('Use the new object ' + smplr.__class__.__name__ + ' with log_probs=False', DeprecationWarning, stacklevel=2)
-    return smplr.sample_tree()
+    # keep legacy version under this function for backward compatibility
 
+    # smplr = CastawayRST(graph, root, log_probs=False, trick=trick)
+    # warn('Use the new object ' + smplr.__class__.__name__ + ' with log_probs=False', DeprecationWarning, stacklevel=2)
+    # return smplr.sample_tree()
+    if not trick:
+        raise NotImplementedError("Only trick=True is supported for now")
+    return legacy_rst(graph, root)
 
 def random_spanning_tree_log(graph: nx.DiGraph, root=0, trick: bool = True) -> nx.DiGraph:
-    smplr = CastawayRST(graph, root, log_probs=True, trick=trick)
-    warn('Use the new object ' + smplr.__class__.__name__ + ' with log_probs=True', DeprecationWarning, stacklevel=2)
-    return smplr.sample_tree()
+    # keep legacy version under this function for backward compatibility
+
+    # smplr = CastawayRST(graph, root, log_probs=True, trick=trick)
+    # warn('Use the new object ' + smplr.__class__.__name__ + ' with log_probs=True', DeprecationWarning, stacklevel=2)
+    # return smplr.sample_tree()
+    if not trick:
+        raise NotImplementedError("Only trick=True is supported for now")
+    return legacy_rst_log(graph, root)
+
 
 
 def kirchoff_rst(graph: nx.DiGraph, root=0, log_probs: bool = False) -> nx.DiGraph:
