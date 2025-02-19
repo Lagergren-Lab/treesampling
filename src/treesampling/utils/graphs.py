@@ -162,7 +162,8 @@ def random_block_matrix_graph(n_nodes: int, n_blocks: int = 2, log_probs: bool =
     return graph
 
 
-def random_tree_skewed_graph(n_nodes, skewness, root: int | None = None) -> tuple[nx.DiGraph, nx.DiGraph]:
+def random_tree_skewed_graph(n_nodes, skewness, root: int | None = None,
+                             log_probs=False) -> tuple[nx.DiGraph, nx.DiGraph]:
     """
     Generate an adjacency matrix by sampling 1 random spanning tree
     and adding k to the weight of each arc on that tree (uses nx random spanning tree function)
@@ -181,6 +182,8 @@ def random_tree_skewed_graph(n_nodes, skewness, root: int | None = None) -> tupl
     tree = nx.random_tree(n_nodes, create_using=nx.DiGraph)
     for e in tree.edges():
         adj_matrix[e] += skewness
+    if log_probs:
+        adj_matrix = np.log(adj_matrix)
     graph = reset_adj_matrix(graph, adj_matrix)
     return graph, tree
 

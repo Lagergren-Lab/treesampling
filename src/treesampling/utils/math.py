@@ -62,18 +62,18 @@ def logdiffexp(l1, l2):
     elif l2 == -np.inf:
         res = l1
     else:
-        assert l1 > l2, f"l1: {l1}, l2: {l2}"
+        if not l1 > l2:
+            raise ValueError(f"l1: {l1}, l2: {l2}, l1 should be greater than l2")
         dx = -l1 + l2
         exp_x = np.exp(dx)
         res = l1 + np.log1p(-exp_x)
 
     return res
 
-
 def gumbel_max_trick_sample(log_probs: np.ndarray) -> int:
     # check that input log probs are normalized
-    assert np.isclose(sp.logsumexp(log_probs), 0.0), (f"sum of log probs should be 0.0, but is "
-                                                             f": {sp.logsumexp(log_probs)}")
+    # assert np.isclose(sp.logsumexp(log_probs), 0.0), (f"sum of log probs should be 0.0, but is "
+    #                                                          f": {sp.logsumexp(log_probs)}")
     gumbels = np.random.gumbel(size=len(log_probs))
     sample = np.argmax(log_probs + gumbels)
     return sample

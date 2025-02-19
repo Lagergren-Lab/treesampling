@@ -2,7 +2,7 @@ import time
 
 import numpy as np
 
-from treesampling.algorithms import CastawayRST, random_spanning_tree_log
+from treesampling.algorithms import CastawayRST, random_spanning_tree_log, wilson_rst
 from treesampling.utils.graphs import random_uniform_graph, random_tree_skewed_graph, tree_to_newick
 
 
@@ -13,7 +13,7 @@ def main():
     tree_skewness = 5  # 1 is a uniform tree, the higher the more skewed towards one single tree
     print(f"Running {n_samples} samples on a graph with {n_nodes} nodes and cache size {cache_size}")
     # graph = random_uniform_graph(n_nodes, log_probs=True, normalize=False)
-    graph, origin_tree = random_tree_skewed_graph(n_nodes, tree_skewness, root=0)
+    graph, origin_tree = random_tree_skewed_graph(n_nodes, tree_skewness, root=0, log_probs=True)
     prebuilt_wx_times = []
     sampler = CastawayRST(graph, 0, log_probs=True, trick=True, cache_size=cache_size)
     trees_newick = {}
@@ -39,13 +39,23 @@ def main():
         end_time = time.time() - start_time
         scratch_wx_times.append(end_time)
 
+    ## wilson benchmark
+    scratch_wx_times_wilson = []
+    for _ in range(n_samples):
+        start_time = time.time()
+        tree = wilson_rst(graph, 0, log_probs=True)
+        end_time = time.time() - start_time
+        scratch_wx_times_wilson.append(end_time)
 
     print("With trick")
     total_prebuilt_wx_time = sum(prebuilt_wx_times)
     total_scratch_wx_time = sum(scratch_wx_times)
+    total_wilson_time = sum(scratch_wx_times_wilson)
     print(f"Prebuilt WX: {total_prebuilt_wx_time / n_samples} +/- {np.std(prebuilt_wx_times)}")
     print(f"Scratch WX: {total_scratch_wx_time / n_samples} +/- {np.std(scratch_wx_times)}")
     print(f"Speedup over {n_samples} samples (in seconds): {total_scratch_wx_time - total_prebuilt_wx_time}")
+    print(f"Wilson WX: {total_wilson_time / n_samples} +/- {np.std(scratch_wx_times_wilson)}")
+    print(f"Speedup wilson/castaway over {n_samples} samples (in seconds): {total_prebuilt_wx_time - total_wilson_time}")
 
     # without trick
     sampler = CastawayRST(graph, 0, log_probs=True, trick=False, cache_size=cache_size)

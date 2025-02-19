@@ -58,7 +58,12 @@ class WxTable:
                 ry_1 = self.op.add([ry_1, self.op.mul([gw[u, v], wx[v, w], gw[w, u]])])
                 # log: logaddexp(ry_1, gw[u, v] + wx[v, w] + gw[w, u])
             self.logger.debug(f"\t- Ry(u, 1) for node {u} in Y = {x}: {ry_1}")
-            ry = self.op.div(self.op.one(), self.op.sub(self.op.one(), ry_1))
+            try:
+                ry = self.op.div(self.op.one(), self.op.sub(self.op.one(), ry_1))
+            except ValueError as ve:
+                self.logger.error(f"Error computing Ry(u) = 1 / (1 - Ry_1(u))")
+                self.logger.error(f"Ry_1(u) = {ry_1}")
+                raise ve
             # log: -np.log(1 - np.exp(ry_1))
             self.logger.debug(f"\t- Ry(u) for node {u} in Y = {x}: {ry}")
 
@@ -108,14 +113,17 @@ class WxTable:
 
         x_tuple = tuple(sorted(self.x))
         if not self.x:
+            # if x is empty, table is empty
             self.wx_dict = {}
         elif self.cache_size > 1 and x_tuple in self._cached_tables:
-            # TODO: test this
+            # if the requested table has already been computed, avoid recomputing
             self.wx_dict = self._cached_tables[x_tuple]
             self._cache_hits[x_tuple] += 1
         elif trick:
+            # remove node in O(n^2)
             self.wx_dict = self._update_trick(u)
         else:
+            # recompute Wx from scratch in O(n^3)
             self.wx_dict = self._build()
         # no nans allowed
         assert not np.any([np.isnan(self.wx_dict[k]) for k in self.wx_dict]), f"NaN values in wx table: {self.wx_dict} at node {u}"
@@ -125,7 +133,15 @@ class WxTable:
         wx_table = {}
         for (v, w) in self.wx_dict.keys():
             if v != u and w != u:
-                wx_table[v, w] = self.op.sub(self.wx_dict[v, w], self.op.div(self.op.mul([self.wx_dict[v, u], self.wx_dict[u, w]]), self.wx_dict[u, u]))
+                try:
+                    wx_table[v, w] = self.op.sub(self.wx_dict[v, w], self.op.div(self.op.mul([self.wx_dict[v, u], self.wx_dict[u, w]]), self.wx_dict[u, u]))
+                except ValueError as ve:
+                    self.logger.error(f"Error updating Wx({v}, {w}) = Wx({v}, {w}) - Wx({v}, {u}) * Wx({u}, {w}) / Wx({u}, {u})")
+                    self.logger.error(f"wx({v}, {w}) = {self.wx_dict[v, w]}")
+                    self.logger.error(f"wx({v}, {u}) = {self.wx_dict[v, u]}")
+                    self.logger.error(f"wx({u}, {w}) = {self.wx_dict[u, w]}")
+                    self.logger.error(f"wx({u}, {u}) = {self.wx_dict[u, u]}")
+                    raise ve
                 # log: logsubexp(self.wx[v, w], self.wx[v, u] + self.wx[u, w] - self.wx[u, u])
                 self.logger.debug(f"\t- Updated Wx({v}, {w}) = Wx({v}, {w})({self.wx_dict[v, w]})"
                               f" - Wx({v}, {u})({self.wx_dict[v, u]}) * Wx({u}, {w})({self.wx_dict[u, w]}) / Wx({u}, {u})({self.wx_dict[u, u]}) = {wx_table[v, w]}")
@@ -231,7 +247,7 @@ class CastawayRST(TreeSampler):
             if np.isclose(self.op.add(nx.to_numpy_array(self.graph)[:, i].tolist()), self.op.one()):
                 # check whether there is a node with weight 1.
                 if np.any(np.isclose(nx.to_numpy_array(self.graph)[:, i], self.op.one())):
-                    j = np.argwhere(np.isclose(nx.to_numpy_array(self.graph)[:, i], self.op.one()))[0]
+                    j = np.argwhere(np.isclose(nx.to_numpy_array(self.graph)[:, i], self.op.one()))[0][0]
                     self.logger.warning(f"edge {j} -> {i} has weight 1.0, all other edges in node {i} will be set to 0.")
                     for k in range(self.graph.number_of_nodes()):
                         if k != j:

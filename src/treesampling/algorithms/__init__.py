@@ -27,14 +27,18 @@ def kirchoff_rst(graph: nx.DiGraph, root=0, log_probs: bool = False) -> nx.DiGra
     """
     Implementation of Kulkarni A8 algorithm for directed graphs.
     """
-    if log_probs:
-        raise ValueError("Kulkarni RST not implemented for log-probabilities")
     # set root column to ones (it only matters it's not zero)
     matrix = nx.to_numpy_array(graph)
     matrix[:, root] = 1.
     graph = reset_adj_matrix(graph, matrix)
     # normalize graph weights
     graph = normalize_graph_weights(graph, log_probs=log_probs)
+    if log_probs:
+        min_log_weight = np.log(np.nextafter(0, 1))
+        matrix[matrix < min_log_weight] = -np.inf
+        W = np.exp(matrix)
+        graph = reset_adj_matrix(graph, W)
+        graph = normalize_graph_weights(graph, log_probs=False)
 
     # initialize empty digraph
     tree = nx.DiGraph()
@@ -108,7 +112,6 @@ def wilson_rst(graph: nx.DiGraph, root=0, log_probs: bool = False) -> nx.DiGraph
             u = prev[u]
     return tree
 
-
 def colbourn_rst(graph: nx.DiGraph, root=0, log_probs: bool = False):
     """
     Re-adapted from rycolab/treesample implementation
@@ -117,11 +120,17 @@ def colbourn_rst(graph: nx.DiGraph, root=0, log_probs: bool = False):
     :param log_probs:
     :return:
     """
-    if log_probs:
-        raise ValueError("Colbourne RST not implemented for log-probabilities")
     # normalize graph weights
     graph = normalize_graph_weights(graph, log_probs=log_probs)
     W = nx.to_numpy_array(graph)
+    if log_probs:
+        # filter probs that are too low and take exp
+        min_log_weight = np.log(np.nextafter(0, 1))
+        W[W < min_log_weight] = -np.inf
+        W = np.exp(W)
+        graph = reset_adj_matrix(graph, W)
+        graph = normalize_graph_weights(graph, log_probs=False)
+
     nodes_perm = [i for i in range(W.shape[1])]
     if root != 0:
         nodes_perm = [root] + [i for i in range(W.shape[1]) if i != root]
