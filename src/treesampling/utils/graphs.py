@@ -280,7 +280,7 @@ def tuttes_tot_weight(graph: nx.DiGraph, root, weight='weight', contracted_arcs=
 
 def kirchoff_matrix(A):
     """
-    Kirchoff matrix of a graph
+    Kirchoff matrix of a graph (Laplacian)
     :param A: adjacency matrix
     :return: Kirchoff matrix
     """

@@ -128,8 +128,10 @@ def test_kirchhoff_tot_weight():
             sample[tree_nwk] += 1
     print(sorted(sample.items(), key=lambda u: u[1], reverse=True))
     # high condition number
+    # FIXME: the condition number should be high for the laplacian matrix not the weight matrix
+    #   issue: how to generate a matrix whose Laplacian has a high condition number?
     # L should be conditioned...
-    weights = generate_random_matrix(n_nodes, condition_number=1e10)
+    weights = generate_random_matrix(n_nodes, condition_number=1e60)
     weights -= np.min(weights)
     # print(weights)
     graph = nx.from_numpy_array(weights)

@@ -33,10 +33,16 @@ def kirchoff_rst(graph: nx.DiGraph, root=0, log_probs: bool = False) -> nx.DiGra
     graph = reset_adj_matrix(graph, matrix)
     # normalize graph weights
     graph = normalize_graph_weights(graph, log_probs=log_probs)
+    graph.remove_edges_from([(u, v) for u, v in graph.edges() if u == v or v == root])
     if log_probs:
         min_log_weight = np.log(np.nextafter(0, 1))
         matrix[matrix < min_log_weight] = -np.inf
         W = np.exp(matrix)
+        # after exp, there might be columns with all zeros, there uniform distribution is assumed
+        null_col = ~np.any(W > 0, axis=0)
+        W[:, null_col] = 1.
+        W[np.diag_indices(W.shape[0])] = 0. # remove self loops
+
         graph = reset_adj_matrix(graph, W)
         graph = normalize_graph_weights(graph, log_probs=False)
 

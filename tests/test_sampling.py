@@ -316,12 +316,15 @@ def test_wilson_rst():
     tot_trees = tg.cayleys_formula(n_nodes)
 
     for log_probs in [False, True]:
+        edge_freqs = np.zeros((n_nodes, n_nodes))
         adj_mat = np.log(adj_mat) if log_probs else adj_mat
         graph = nx.from_numpy_array(adj_mat, create_using=nx.DiGraph)
         sample_size = 3 * tot_trees
         sample_dict = {}
         for s in range(sample_size):
             tree = algorithms.wilson_rst(graph, root=0, log_probs=log_probs)
+            for edge in tree.edges():
+                edge_freqs[edge] += 1
             tree_nwk = tg.tree_to_newick(tree)
             if tree_nwk not in sample_dict:
                 sample_dict[tree_nwk] = 0
@@ -334,6 +337,12 @@ def test_wilson_rst():
         test_result = chisquare(f_obs=freqs)
         assert test_result.pvalue >= 0.95, (f"chisq test not passed: evidence that distribution is not uniform"
                                             f" [log_probs = {log_probs}]")
+
+        print(edge_freqs / edge_freqs.sum(axis=1, keepdims=True))
+        if log_probs:
+            adj_mat = np.exp(adj_mat)
+        print(adj_mat / adj_mat.sum(axis=1, keepdims=True))
+
 
 def test_kirchoff_rst():
     n_nodes = 6
@@ -370,12 +379,15 @@ def test_colbourn_rst():
     # cardinality of tree topology
     tot_trees = tg.cayleys_formula(n_nodes)
 
+    edge_freqs = np.zeros((n_nodes, n_nodes))
     adj_mat = adj_mat
     graph = nx.from_numpy_array(adj_mat, create_using=nx.DiGraph)
     sample_size = 3 * tot_trees
     sample_dict = {}
     for s in range(sample_size):
         tree = algorithms.colbourn_rst(graph, root=root, log_probs=False)
+        for edge in tree.edges():
+            edge_freqs[edge] += 1
         tree_nwk = tg.tree_to_newick(tree)
         if tree_nwk not in sample_dict:
             sample_dict[tree_nwk] = 0
