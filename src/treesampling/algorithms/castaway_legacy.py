@@ -1,3 +1,5 @@
+import itertools
+import logging
 import random
 import networkx as nx
 import numpy as np
@@ -27,24 +29,31 @@ def castaway_rst(graph: nx.DiGraph, root=0, log_probs: bool = False, trick: bool
         is computed from scratch every time a new arc is added to the tree
     :return:
     """
+    weight_matrix = nx.to_numpy_array(graph)
 
     if log_probs:
-        return _castaway_rst_log(graph, root, trick)
+        return _castaway_rst_log(weight_matrix, root, trick)
     else:
-        return _castaway_rst_plain(graph, root, trick)
+        return _castaway_rst_plain(weight_matrix, root, trick)
 
 
-def _castaway_rst_plain(in_graph: nx.DiGraph, root, trick=True) -> nx.DiGraph:
+def _castaway_rst_plain(weight_matrix: np.ndarray, root, trick=True) -> nx.DiGraph:
     """
     Sample one tree from a given graph with fast arborescence sampling algorithm.
-    :param in_graph: must have log-scale weights
+    :param weight_matrix: np.ndarray, weighted adjacency matrix
     :param root: root node
     :param trick: if false, Wx gets re-computed every time
     :return: nx.DiGraph with tree edges only
     """
     # normalize out arcs (cols)
     # print("BEGIN ALGORITHM")
-    graph = normalize_graph_weights(in_graph, rowwise=False, log_probs=False)
+    n_nodes = weight_matrix.shape[0]
+    graph = nx.DiGraph()
+    # initialize edges
+    for u, v in itertools.product(range(n_nodes), repeat=2):
+        if u != v and v != root and weight_matrix[u, v] != 0:
+            graph.add_edge(u, v, weight=weight_matrix[u, v])
+    graph = normalize_graph_weights(graph, rowwise=False, log_probs=False)
 
     # algorithm variables
     tree = nx.DiGraph()
@@ -192,20 +201,23 @@ def _compute_wx_table(graph: nx.DiGraph, x_set: list) -> dict:
     return wx
 
 
-def _castaway_rst_log(in_graph: nx.DiGraph, root, trick=True) -> nx.DiGraph:
+def _castaway_rst_log(weight_matrix: np.ndarray, root, trick=True) -> nx.DiGraph:
     """
     Sample one tree from a given graph with fast arborescence sampling algorithm.
-    :param in_graph: must have log-scale weights
+    :param weight_matrix: np.ndarray, weighted adjacency matrix
     :param root: root node
     :param trick: if false, Wx gets re-computed every time
     :return: nx.DiGraph with tree edges only
     """
-    # normalize out arcs (cols)
     # print("BEGIN ALGORITHM")
     # set non-existing edge weights to -inf
-    missing_edges = nx.difference(nx.complete_graph(in_graph.number_of_nodes()), in_graph)
-    in_graph.add_edges_from([(u, v, {'weight': -np.inf}) for u, v in missing_edges.edges()])
-    graph = normalize_graph_weights(in_graph, rowwise=False, log_probs=True)
+    n_nodes = weight_matrix.shape[0]
+    graph = nx.DiGraph()
+    # initialize edges
+    for u, v in itertools.product(range(n_nodes), repeat=2):
+        if u != v and v != root and weight_matrix[u, v] != -np.inf:
+            graph.add_edge(u, v, weight=weight_matrix[u, v])
+    graph = normalize_graph_weights(graph, rowwise=False, log_probs=True)
 
     # algorithm variables
     tree = nx.DiGraph()
@@ -312,7 +324,11 @@ def _update_wx_log(wy_table, u) -> dict:
                     # wx can't be any less than that (avoids logsubexp(-inf, a) where -np.inf < a << 0 )
                     a = - np.inf
                 else:
-                    a = logsubexp(wy_table[v, w], wy_table[v, u] + wy_table[u, w] - wy_table[u, u])
+                    try:
+                        a = logsubexp(wy_table[v, w], wy_table[v, u] + wy_table[u, w] - wy_table[u, u])
+                    except ValueError as ve:
+                        print(f"[DBG] logsubexp failed at update: removing {u} from y_set = {set([x for x, y in wy_table.keys()])}")
+                        raise ve
                 wx_table[v, w] = a
     return wx_table
 

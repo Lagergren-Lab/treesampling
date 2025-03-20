@@ -51,6 +51,35 @@ def enumerate_rooted_trees(n_nodes, root=0, weighted_graph: nx.DiGraph | None = 
         trees.append(rooted_tree)
     return trees
 
+def block_matrix(n_nodes: int, n_blocks: int = 2, log_probs: bool = False, low_weight: float = 1e-3,
+                 root: int = None) -> np.ndarray:
+    """
+    Generate a symmetric block matrix with weight of 1 for intra-block connections and low_weight for inter-block connections.
+    :param n_nodes: int, number of nodes
+    :param n_blocks: int, number of blocks
+    :param log_probs: bool, if True, weights are log probabilities
+    :param low_weight: float, weight for inter-block connections
+    :param root: int, root index if any
+    :return: np.ndarray, block matrix
+    """
+
+    op = StableOp(log_probs)
+    weights = np.zeros((n_nodes, n_nodes)) + low_weight
+
+    # divide nodes into k components
+    nodes_per_component = n_nodes // n_blocks
+    components = [i // nodes_per_component for i in range(nodes_per_component * n_blocks)]
+    # fill remaining nodes with last component
+    components = components + [n_blocks - 1] * (n_nodes - len(components))
+    # assign lower weight to arcs between components
+    for i in range(n_nodes):
+        for j in range(n_nodes):
+            if i == j or (root is not None and j == root):
+                weights[i, j] = op.zero()
+            # set 1 for arcs within components
+            elif components[i] == components[j]:
+                weights[i, j] = op.one()
+    return weights
 
 def random_uniform_graph(n_nodes, log_probs=False, normalize=None) -> nx.DiGraph:
     """

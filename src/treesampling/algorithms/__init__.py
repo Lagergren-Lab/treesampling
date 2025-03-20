@@ -1,6 +1,7 @@
 import time
 import networkx as nx
 import numpy as np
+from scipy.special import logsumexp
 
 from treesampling.algorithms.castaway import CastawayRST
 
@@ -54,8 +55,8 @@ def kirchoff_rst(graph: nx.DiGraph, root=0, log_probs: bool = False) -> nx.DiGra
     deleted_arcs = []
     while len(tree.edges()) < graph.number_of_nodes() - 1:
         # pick edge (sorted by weight so to increase acceptance ratio)
-        # print(arc_candidates)
-        # print(tree.edges())
+        # print("candidates: ", arc_candidates)
+        # print("current tree: ", tree.edges())
         arc = arc_candidates.pop(0)
         # sample uniform (0,1) and check if edge is added
         # sum of weights of trees including tree edges
@@ -89,11 +90,15 @@ def kirchoff_rst(graph: nx.DiGraph, root=0, log_probs: bool = False) -> nx.DiGra
     return tree
 
 
-def wilson_rst(graph: nx.DiGraph, root=0, log_probs: bool = False) -> nx.DiGraph:
-    n_nodes = graph.number_of_nodes()
-    # normalize graph
-    norm_graph = normalize_graph_weights(graph, log_probs=log_probs)
-    weights = nx.to_numpy_array(norm_graph)
+def wilson_rst_from_matrix(weights: np.ndarray, root=0, log_probs: bool = False) -> nx.DiGraph:
+    """
+    Takes a weight matrix (normalized by columns) and returns a random spanning tree.
+    :param weights: np.ndarray of shape (n_nodes, n_nodes), normalized arc weights
+    :param root: int, root node
+    :param log_probs: bool, if True, weights are in log scale
+    :return:
+    """
+    n_nodes = weights.shape[0]
     tree = nx.DiGraph()
     t_set = {root}
     x_set = {x for x in list(range(n_nodes))}.difference(t_set)
@@ -118,6 +123,21 @@ def wilson_rst(graph: nx.DiGraph, root=0, log_probs: bool = False) -> nx.DiGraph
             u = prev[u]
     return tree
 
+
+def wilson_rst(graph: nx.DiGraph, root=0, log_probs: bool = False) -> nx.DiGraph:
+    # normalize weights
+    weights = nx.to_numpy_array(graph)
+    if log_probs:
+        norm_weights = weights - logsumexp(weights, axis=0, keepdims=True)
+        norm_weights[:, 0] = -np.inf
+        norm_weights[np.diag_indices(norm_weights.shape[0])] = -np.inf
+    else:
+        norm_weights = weights / np.sum(weights, axis=0, keepdims=True)
+        norm_weights[:, 0] = 0
+        norm_weights[np.diag_indices(norm_weights.shape[0])] = 0
+    tree = wilson_rst_from_matrix(norm_weights, root, log_probs)
+    return tree
+
 def colbourn_rst(graph: nx.DiGraph, root=0, log_probs: bool = False):
     """
     Re-adapted from rycolab/treesample implementation
@@ -139,6 +159,7 @@ def colbourn_rst(graph: nx.DiGraph, root=0, log_probs: bool = False):
 
     nodes_perm = [i for i in range(W.shape[1])]
     if root != 0:
+        # this makes the root 0 which is required by the subroutine below
         nodes_perm = [root] + [i for i in range(W.shape[1]) if i != root]
         W = W[:, nodes_perm]
     tree = _colbourn_tree_from_matrix(W)

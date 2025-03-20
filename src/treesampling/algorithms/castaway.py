@@ -230,6 +230,8 @@ class CastawayRST(TreeSampler):
         if self.debug:
             self.logger.setLevel(logging.DEBUG)
 
+        # FIXME: sampler should take a matrix as input and construct the graph itself
+        #   NOTE: nx.from_numpy_array only adds edges with weight != 0, which means it is not suited for log probs
         self._adjust_graph()
         # initialize x set to all nodes except the root
         self.x_list = list(set(self.graph.nodes()).difference([self.root]))
