@@ -92,12 +92,23 @@ def kirchoff_rst(graph: nx.DiGraph, root=0, log_probs: bool = False) -> nx.DiGra
 
 def wilson_rst_from_matrix(weights: np.ndarray, root=0, log_probs: bool = False) -> nx.DiGraph:
     """
-    Takes a weight matrix (normalized by columns) and returns a random spanning tree.
+    Takes a weight matrix.
     :param weights: np.ndarray of shape (n_nodes, n_nodes), normalized arc weights
     :param root: int, root node
     :param log_probs: bool, if True, weights are in log scale
     :return:
     """
+    weights = np.copy(weights)
+    # normalize
+    if log_probs:
+        weights = weights - logsumexp(weights, axis=0, keepdims=True)
+        weights[:, 0] = -np.inf
+        weights[np.diag_indices(weights.shape[0])] = -np.inf
+    else:
+        weights = weights / np.sum(weights, axis=0, keepdims=True)
+        weights[:, 0] = 0
+        weights[np.diag_indices(weights.shape[0])] = 0
+
     n_nodes = weights.shape[0]
     tree = nx.DiGraph()
     t_set = {root}
@@ -127,15 +138,7 @@ def wilson_rst_from_matrix(weights: np.ndarray, root=0, log_probs: bool = False)
 def wilson_rst(graph: nx.DiGraph, root=0, log_probs: bool = False) -> nx.DiGraph:
     # normalize weights
     weights = nx.to_numpy_array(graph)
-    if log_probs:
-        norm_weights = weights - logsumexp(weights, axis=0, keepdims=True)
-        norm_weights[:, 0] = -np.inf
-        norm_weights[np.diag_indices(norm_weights.shape[0])] = -np.inf
-    else:
-        norm_weights = weights / np.sum(weights, axis=0, keepdims=True)
-        norm_weights[:, 0] = 0
-        norm_weights[np.diag_indices(norm_weights.shape[0])] = 0
-    tree = wilson_rst_from_matrix(norm_weights, root, log_probs)
+    tree = wilson_rst_from_matrix(weights, root, log_probs)
     return tree
 
 def colbourn_rst(graph: nx.DiGraph, root=0, log_probs: bool = False):

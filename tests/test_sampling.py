@@ -8,7 +8,8 @@ import scipy.special as sp
 
 from treesampling import algorithms
 import treesampling.utils.graphs as tg
-from treesampling.algorithms import CastawayRST, kirchoff_rst
+from treesampling.algorithms import CastawayRST, kirchoff_rst, wilson_rst_from_matrix
+from treesampling.algorithms.castaway_legacy import _castaway_rst_plain, _castaway_rst_log
 from treesampling.utils.graphs import tree_to_newick, graph_weight, reset_adj_matrix, tuttes_tot_weight, cayleys_formula
 
 
@@ -343,6 +344,151 @@ def test_wilson_rst():
             adj_mat = np.exp(adj_mat)
         print(adj_mat / adj_mat.sum(axis=1, keepdims=True))
 
+def test_wilson_4_nodes():
+    def laplacian(A, r):
+        """
+        Root-weighted Laplacian of Koo et al. (2007)
+        A is the adjacency matrix and r is the root weight
+        """
+        L = -A + np.diag(np.sum(A, 0))
+        L[0] = r
+        return L
+
+    def tree_weight(tree, matrix):
+        return np.prod([matrix[u, v] for u, v in tree.edges()])
+
+    K = 4
+    N = 10000
+    # random matrix
+    W = np.random.uniform(0, 1, size=(K, K))
+    np.fill_diagonal(W, 0)
+
+    # prepare normalization factor
+    A = np.copy(W)
+    L = laplacian(A[1:, 1:], A[0, 1:])
+    new_det = np.linalg.det(L)
+    print(f"new det: {new_det}")
+    graph = nx.from_numpy_array(W, create_using=nx.DiGraph)
+    tuttes_det = tuttes_tot_weight(graph, root=0)
+    print(f"tuttes det: {tuttes_det}")
+    Z = tuttes_det
+
+    # gather sample
+    dist = {}
+    real_prob = {}
+    for _ in range(N):
+        tree = wilson_rst_from_matrix(W, 0)
+        tree_nwk = tree_to_newick(tree)
+        if tree_nwk not in dist:
+            real_prob[tree_nwk] = tree_weight(tree, W) / Z
+            dist[tree_nwk] = 0
+        dist[tree_nwk] += 1 / N
+    approx = 0
+    total = len(dist)
+    for tree_nwk in dist:
+        prob = dist[tree_nwk]
+        rp = real_prob[tree_nwk]
+        approx += np.isclose(prob, rp, rtol=0.1)
+        print(f"{tree_nwk}: {prob} vs {rp}")
+    print(approx, total)
+
+
+def test_castaway_4_nodes():
+    def laplacian(A, r):
+        """
+        Root-weighted Laplacian of Koo et al. (2007)
+        A is the adjacency matrix and r is the root weight
+        """
+        L = -A + np.diag(np.sum(A, 0))
+        L[0] = r
+        return L
+
+    def tree_weight(tree, matrix):
+        return np.prod([matrix[u, v] for u, v in tree.edges()])
+
+    K = 4
+    N = 10000
+    # random matrix
+    W = np.random.uniform(0, 1, size=(K, K))
+    np.fill_diagonal(W, 0)
+
+    # prepare normalization factor
+    A = np.copy(W)
+    L = laplacian(A[1:, 1:], A[0, 1:])
+    new_det = np.linalg.det(L)
+    print(f"new det: {new_det}")
+    graph = nx.from_numpy_array(W, create_using=nx.DiGraph)
+    tuttes_det = tuttes_tot_weight(graph, root=0)
+    print(f"tuttes det: {tuttes_det}")
+    Z = tuttes_det
+
+    # gather sample
+    dist = {}
+    real_prob = {}
+    for _ in range(N):
+        tree = _castaway_rst_plain(W, 0)
+        tree_nwk = tree_to_newick(tree)
+        if tree_nwk not in dist:
+            real_prob[tree_nwk] = tree_weight(tree, W) / Z
+            dist[tree_nwk] = 0
+        dist[tree_nwk] += 1 / N
+    approx = 0
+    total = len(dist)
+    for tree_nwk in dist:
+        prob = dist[tree_nwk]
+        rp = real_prob[tree_nwk]
+        approx += np.isclose(prob, rp, rtol=0.1)
+        print(f"{tree_nwk}: {prob} vs {rp}")
+    print(approx, total)
+
+def test_castaway_log_4_nodes():
+    def laplacian(A, r):
+        """
+        Root-weighted Laplacian of Koo et al. (2007)
+        A is the adjacency matrix and r is the root weight
+        """
+        L = -A + np.diag(np.sum(A, 0))
+        L[0] = r
+        return L
+
+    def tree_weight(tree, matrix):
+        return np.sum([matrix[u, v] for u, v in tree.edges()])
+
+    K = 4
+    N = 10000
+    # random matrix
+    W = np.random.uniform(0, 1, size=(K, K))
+    np.fill_diagonal(W, 0)
+    # prepare normalization factor
+    A = np.copy(W)
+    L = laplacian(A[1:, 1:], A[0, 1:])
+    new_det = np.linalg.det(L)
+    print(f"new det: {new_det}")
+    graph = nx.from_numpy_array(W, create_using=nx.DiGraph)
+    tuttes_det = tuttes_tot_weight(graph, root=0)
+    print(f"tuttes det: {tuttes_det}")
+    Z = tuttes_det
+
+    W = np.log(W)
+
+    # gather sample
+    dist = {}
+    real_prob = {}
+    for _ in range(N):
+        tree = _castaway_rst_log(W, 0)
+        tree_nwk = tree_to_newick(tree)
+        if tree_nwk not in dist:
+            real_prob[tree_nwk] = tree_weight(tree, W) - np.log(Z)
+            dist[tree_nwk] = 0
+        dist[tree_nwk] += 1 / N
+    approx = 0
+    total = len(dist)
+    for tree_nwk in dist:
+        prob = np.log(dist[tree_nwk])
+        rp = real_prob[tree_nwk]
+        approx += np.isclose(prob, rp, rtol=0.1)
+        print(f"{tree_nwk}: {prob} vs {rp}")
+    print(approx, total)
 
 def test_kirchoff_rst():
     n_nodes = 6
