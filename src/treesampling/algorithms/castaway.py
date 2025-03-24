@@ -12,13 +12,13 @@ from treesampling.utils.math import StableOp
 class WxTable:
     def __init__(self, x: list, weights: np.ndarray = None, log_probs: bool = False, cache_size: int = 1, **kwargs):
         self.op = StableOp(log_probs=log_probs)  # dispatch stable operations
+        self.logger = logging.getLogger(self.__class__.__name__)
+        self.logger.setLevel(logging.INFO)
         if weights is None:
             self.logger.warning("graph parameter is deprecated, just use weight matrix")
             self.weights = kwargs.get("graph")
         self.x = x
-        self.weights = weights
-        self.logger = logging.getLogger(self.__class__.__name__)
-        self.logger.setLevel(logging.INFO)
+        self.weights = weights.copy()
         self.debug = kwargs.get('debug', False)
         self.cache_size = cache_size
         if self.debug:
@@ -397,7 +397,7 @@ class CastawayRST(TreeSampler):
         return self.op.normalize(w_choice)
 
 
-def test():
+def check():
     n_seeds = 100
     N = 10000
     k = 4
@@ -427,7 +427,7 @@ def test():
             # print(f"tree: {tree}, prob: {prob}, freq: {dist[tree]}")
     print(acc / (len(dist) * n_seeds) * 100, "% of trees have been sampled correctly")
 
-def test_log():
+def check_log():
     print("Testing CastawayRST with log probabilities...")
     n_seeds = 100
     N = 10000
@@ -458,7 +458,7 @@ def test_log():
             # print(f"tree: {tree}, prob: {prob}, freq: {dist[tree]}")
     print(acc / (len(dist) * n_seeds) * 100, "% of trees have been sampled correctly")
 
-def test_trick():
+def check_trick():
     print("Testing CastawayRST trick -> O(n^3)...")
     n_seeds = 100
     N = 10000
@@ -490,7 +490,7 @@ def test_trick():
     print(acc / (len(dist) * n_seeds) * 100, "% of trees have been sampled correctly")
 
 
-def test_log_trick():
+def check_log_trick():
     print("Testing CastawayRST trick -> O(n^3) with log probabilities...")
     n_seeds = 100
     N = 10000
@@ -523,7 +523,7 @@ def test_log_trick():
 
 
 if __name__ == '__main__':
-    test_log_trick()
+    check_log_trick()
     # # debug algorithm steps
     # np.random.seed(42)
     # # random graph

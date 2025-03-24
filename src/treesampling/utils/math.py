@@ -7,17 +7,17 @@ class StableOp:
     def __init__(self, log_probs=False):
         self.log_probs = log_probs
 
-    def add(self, items: list):
+    def add(self, items: list, axis=None):
         if self.log_probs:
-            return np.logaddexp.reduce(items)
+            return sp.logsumexp(items, axis=axis)
         else:
-            return np.sum(items)
+            return np.sum(items, axis=axis)
 
-    def mul(self, items: list):
+    def mul(self, items: list, axis=None):
         if self.log_probs:
-            return np.sum(items)
+            return np.sum(items, axis=axis)
         else:
-            return np.prod(items)
+            return np.prod(items, axis=axis)
 
     def div(self, a, b):
         if self.log_probs:
