@@ -1,6 +1,7 @@
 import random
 import networkx as nx
 import numpy as np
+import scipy.special as sp
 
 from treesampling.algorithms import CastawayRST
 from treesampling.utils.graphs import reset_adj_matrix, random_tree_skewed_graph, tree_to_newick, \
@@ -200,14 +201,22 @@ def _castaway_rst_log(in_graph: nx.DiGraph, root, trick=True) -> nx.DiGraph:
     :param trick: if false, Wx gets re-computed every time
     :return: nx.DiGraph with tree edges only
     """
-    # normalize out arcs (cols)
-    # print("BEGIN ALGORITHM")
-    # set non-existing edge weights to -inf
-    missing_edges = nx.difference(nx.complete_graph(in_graph.number_of_nodes()), in_graph)
-    in_graph.add_edges_from([(u, v, {'weight': -np.inf}) for u, v in missing_edges.edges()])
-    graph = normalize_graph_weights(in_graph, rowwise=False, log_probs=True)
-
-    # algorithm variables
+    # ----------------------------
+    # PREPARE MATRIX FOR SAMPLING
+    weight_matrix = nx.to_numpy_array(in_graph)
+    all_but_root = [v for v in in_graph.nodes() if v != root]
+    # if not normalized, normalize
+    is_normalized = np.allclose(sp.logsumexp(weight_matrix[:, all_but_root]), np.zeros(len(all_but_root)))
+    if not is_normalized:
+        weight_matrix[:, all_but_root] = weight_matrix[:, all_but_root] - sp.logsumexp(weight_matrix[:, all_but_root])
+    # set self loops and arcs to root to -inf
+    weight_matrix[:, root] = - np.inf
+    weight_matrix[np.diag_indices(weight_matrix.shape[0])] = - np.inf
+    # set graph with new weights
+    graph = reset_adj_matrix(in_graph, weight_matrix)
+    # ----------------------------
+    # ALGORITHM
+    # variables
     tree = nx.DiGraph()
     tree.add_node(root)
     dangling_path: list[tuple] = []  # store dangling path branch (not yet attached to tree, not in X)
