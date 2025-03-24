@@ -241,6 +241,11 @@ def reset_adj_matrix(graph: nx.DiGraph, matrix: np.ndarray) -> nx.DiGraph:
     new_graph.add_weighted_edges_from(weights_dict)
     return new_graph
 
+def tree_weight(tree: list[int] | tuple[int], weight_matrix: np.ndarray, log_probs: bool = False) -> float:
+    # takes tree (as list of parent nodes, where -1 indicates root node)
+    op = StableOp(log_probs)
+    arcs_idx = list(zip(*[(i, j) for j, i in enumerate(tree) if i != -1]))  # [(i1, i2, ..., in-1), (j1, j2, ..., jn-1)]
+    return op.mul(weight_matrix[arcs_idx[0], arcs_idx[1]].tolist())
 
 def graph_weight(graph: nx.DiGraph, log_probs=False):
     if log_probs:
@@ -279,6 +284,16 @@ def adjoint(mat):
         for j in range(N):
             adj[i, j] = (-1)**(i + j) * np.linalg.det(mat_minor(mat, i, j))
     return adj
+
+def tuttes_determinant(X: np.ndarray) -> float:
+    """
+    Tutte's determinant of a graph (with root in 0)
+    :param X: adjacency matrix
+    :return: Tutte's determinant
+    """
+    A = np.copy(X)
+    L = kirchoff_matrix(A)
+    return np.linalg.det(L[1:, 1:])
 
 
 def tuttes_tot_weight(graph: nx.DiGraph, root, weight='weight', contracted_arcs=None, deleted_arcs=None):
@@ -335,3 +350,15 @@ def kirchhoff_tot_weight(graph, minor_row=0, minor_col=0):
 def cayleys_formula(n):
     assert n > 1
     return n**(n-2)
+
+def nxtree_from_array(t: np.ndarray):
+    """
+    Convert a tree array to nx.DiGraph. Assumes the tree is rooted at 0.
+    :param t: array of shape (n_nodes,)
+    :return: nx.DiGraph
+    """
+    n = len(t) + 1
+    tree = nx.DiGraph()
+    for i, p in enumerate(t):
+        tree.add_edge(p, i + 1)
+    return tree

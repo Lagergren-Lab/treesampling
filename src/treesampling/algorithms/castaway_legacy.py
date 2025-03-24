@@ -6,7 +6,7 @@ import numpy as np
 
 from treesampling.algorithms import CastawayRST
 from treesampling.utils.graphs import reset_adj_matrix, random_tree_skewed_graph, tree_to_newick, \
-    random_block_matrix_graph
+    random_block_matrix_graph, tuttes_determinant, tree_weight
 from warnings import warn
 
 def random_spanning_tree(graph: nx.DiGraph, root=0) -> nx.DiGraph:
@@ -212,12 +212,17 @@ def _castaway_rst_log(weight_matrix: np.ndarray, root, trick=True) -> nx.DiGraph
     # print("BEGIN ALGORITHM")
     # set non-existing edge weights to -inf
     n_nodes = weight_matrix.shape[0]
+    weights = np.copy(weight_matrix)
+    weights[np.diag_indices(n_nodes)] = -np.inf
+    # normalize out arcs (cols)
+    weights = weights - np.logaddexp.reduce(weights, axis=0, keepdims=True)
+    weights[:, root] = -np.inf
+
     graph = nx.DiGraph()
     # initialize edges
     for u, v in itertools.product(range(n_nodes), repeat=2):
         if u != v and v != root and weight_matrix[u, v] != -np.inf:
             graph.add_edge(u, v, weight=weight_matrix[u, v])
-    graph = normalize_graph_weights(graph, rowwise=False, log_probs=True)
 
     # algorithm variables
     tree = nx.DiGraph()
@@ -423,34 +428,109 @@ def gumbel_max_trick_sample(log_probs: np.ndarray) -> int:
     sample = np.argmax(log_probs + gumbels)
     return sample
 
+def tree_to_list(tree_nx: nx.DiGraph) -> list[int]:
+    # return the list of parents for each node, root node has -1
+    tree_list = [-1] * tree_nx.number_of_nodes()
+    for i, j in tree_nx.edges():
+        tree_list[j] = i
+
+    return tree_list
+
+def test():
+    N = 10000
+    n_seeds = 100
+    k = 4
+    acc = 0
+    for seed in range(n_seeds):
+        X = np.random.uniform(0, 1, size=(k, k))
+        # setup matrix
+        np.fill_diagonal(X, 0)
+        X[:, 0] = 0.
+        X[:, 1:] = X[:, 1:] / np.sum(X[:, 1:], axis=0)
+        # compute total trees weight
+        Z = tuttes_determinant(X)
+        # print(f"total weight: {Z}")
+
+        # save frequencies and weight of each new tree
+        dist = {}
+        for i in range(N):
+            tree_nx = _castaway_rst_plain(X, root=0, trick=False)
+            tree = tuple(tree_to_list(tree_nx))
+            if tree not in dist:
+                dist[tree] = 0
+            dist[tree] += 1 / N
+
+        for tree in dist:
+            prob = tree_weight(np.array(tree, dtype=int), X) / Z
+            acc += 1 if np.isclose(dist[tree], prob, rtol=.1) else 0
+            # print(f"tree: {tree}, prob: {prob}, empirical: {dist[tree]}")
+
+    print(acc / (len(dist) * n_seeds) * 100, "% of trees have been sampled correctly")
+
+
+def test_log():
+    print("Testing castaway_legacy with log probabilities...")
+    n_seeds = 100
+    N = 10000
+    n_seeds = 100
+    k = 4
+    acc = 0
+    for seed in range(n_seeds):
+        X = np.random.uniform(0, 1, size=(k, k))
+        # setup matrix
+        np.fill_diagonal(X, 0)
+        X[:, 0] = 0.
+        X[:, 1:] = X[:, 1:] / np.sum(X[:, 1:], axis=0)
+        # compute total trees weight
+        Z = tuttes_determinant(X)
+        # print(f"total weight: {Z}")
+
+        # save frequencies and weight of each new tree
+        dist = {}
+        for i in range(N):
+            tree_nx = _castaway_rst_log(np.log(X), root=0, trick=False)
+            tree = tuple(tree_to_list(tree_nx))
+            if tree not in dist:
+                dist[tree] = 0
+            dist[tree] += 1 / N
+
+        for tree in dist:
+            prob = tree_weight(np.array(tree, dtype=int), X) / Z
+            acc += 1 if np.isclose(dist[tree], prob, rtol=.1) else 0
+            # print(f"tree: {tree}, prob: {prob}, empirical: {dist[tree]}")
+
+    print(acc / (len(dist) * n_seeds) * 100, "% of trees have been sampled correctly")
+
+
 if __name__=='__main__':
+    test_log()
 
     # create a directed graph
-    # graph, g_tree = random_tree_skewed_graph(5, 20, root=0, log_probs=True)
-    graph = random_block_matrix_graph(5, 2, True, p=0.05)
-
-    # set seed
+    # # graph, g_tree = random_tree_skewed_graph(5, 20, root=0, log_probs=True)
+    # graph = random_block_matrix_graph(5, 2, True, p=0.05)
+    #
+    # # set seed
+    # # random.seed(42)
+    # # np.random.seed(42)
+    # # # sample a tree with legacy version
+    # # tree1 = random_spanning_tree_log(graph, root=0)
+    #
     # random.seed(42)
     # np.random.seed(42)
-    # # sample a tree with legacy version
-    # tree1 = random_spanning_tree_log(graph, root=0)
-
-    random.seed(42)
-    np.random.seed(42)
-    # sample with OO version
-    sampler = CastawayRST(graph, root=0, log_probs=True)
-    for _ in range(100):
-        tree2 = None
-        miss = 0
-        while tree2 is None and miss < 20:
-            try:
-                tree2 = random_spanning_tree_log(graph, root=0)
-            except ValueError as ve:
-                miss += 1
-                tree2 = None
-        if miss > 20:
-            print(f"FAIL")
-            continue
-
-    # print(tree_to_newick(tree1))
-    print(tree_to_newick(tree2))
+    # # sample with OO version
+    # sampler = CastawayRST(graph, root=0, log_probs=True)
+    # for _ in range(100):
+    #     tree2 = None
+    #     miss = 0
+    #     while tree2 is None and miss < 20:
+    #         try:
+    #             tree2 = random_spanning_tree_log(graph, root=0)
+    #         except ValueError as ve:
+    #             miss += 1
+    #             tree2 = None
+    #     if miss > 20:
+    #         print(f"FAIL")
+    #         continue
+    #
+    # # print(tree_to_newick(tree1))
+    # print(tree_to_newick(tree2))

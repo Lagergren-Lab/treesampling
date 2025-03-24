@@ -1,11 +1,12 @@
+import logging
 import time
 import networkx as nx
 import numpy as np
-from scipy.special import logsumexp
+import scipy.special as sp
 
 from treesampling.algorithms.castaway import CastawayRST
+from treesampling.algorithms.wilson import wilson_rst
 
-from treesampling.utils.math import gumbel_max_trick_sample
 from treesampling.utils.graphs import graph_weight, tuttes_tot_weight, reset_adj_matrix
 
 from treesampling.utils.graphs import random_uniform_graph, normalize_graph_weights
@@ -90,58 +91,24 @@ def kirchoff_rst(graph: nx.DiGraph, root=0, log_probs: bool = False) -> nx.DiGra
     return tree
 
 
-def wilson_rst_from_matrix(weights: np.ndarray, root=0, log_probs: bool = False) -> nx.DiGraph:
-    """
-    Takes a weight matrix.
-    :param weights: np.ndarray of shape (n_nodes, n_nodes), normalized arc weights
-    :param root: int, root node
-    :param log_probs: bool, if True, weights are in log scale
-    :return:
-    """
-    weights = np.copy(weights)
-    # normalize
-    if log_probs:
-        weights = weights - logsumexp(weights, axis=0, keepdims=True)
-        weights[:, 0] = -np.inf
-        weights[np.diag_indices(weights.shape[0])] = -np.inf
-    else:
-        weights = weights / np.sum(weights, axis=0, keepdims=True)
-        weights[:, 0] = 0
-        weights[np.diag_indices(weights.shape[0])] = 0
+def stable_matrix_exp(W, root=0):
+    # normalize graph weights
+    W = W - sp.logsumexp(W, axis=0)
+    # filter probs that are too low and take exp
+    min_log_weight = np.log(np.nextafter(0, 1))
+    # if there exists a column with all values below min_log_weight, set the max weight to log(1)
+    null_col = np.nonzero(~np.any(W > min_log_weight, axis=0))[0].tolist()
+    for nc in null_col:
+        max_idx = np.argmax(W[:, nc])
+        W[max_idx, nc] = 0.
 
-    n_nodes = weights.shape[0]
-    tree = nx.DiGraph()
-    t_set = {root}
-    x_set = {x for x in list(range(n_nodes))}.difference(t_set)
-    # pick random node from x
-    prev = [None] * n_nodes
-    while x_set:
-        i = np.random.choice(list(x_set))
-        u = i
-        while u not in t_set:
-            # loop-erased random walk
-            if log_probs:
-                prev[u] = gumbel_max_trick_sample(weights[:, u])
-            else:
-                prev[u] = np.random.choice(np.arange(n_nodes), size=1, p=weights[:, u])[0]
-            u = prev[u]
-        u = i
-        while u not in t_set:
-            # add to tree
-            tree.add_edge(prev[u], u, weight=weights[prev[u], u])
-            x_set.remove(u)
-            t_set.add(u)
-            u = prev[u]
-    return tree
+    W = np.exp(W)
+    W[np.diag_indices(W.shape[0])] = 0  # remove self loops
+    W[:, root] = 0
+    return W
 
 
-def wilson_rst(graph: nx.DiGraph, root=0, log_probs: bool = False) -> nx.DiGraph:
-    # normalize weights
-    weights = nx.to_numpy_array(graph)
-    tree = wilson_rst_from_matrix(weights, root, log_probs)
-    return tree
-
-def colbourn_rst(graph: nx.DiGraph, root=0, log_probs: bool = False):
+def colbourn_rst(graph: nx.DiGraph | np.ndarray, root=0, log_probs: bool = False):
     """
     Re-adapted from rycolab/treesample implementation
     :param graph:
@@ -150,15 +117,19 @@ def colbourn_rst(graph: nx.DiGraph, root=0, log_probs: bool = False):
     :return:
     """
     # normalize graph weights
-    graph = normalize_graph_weights(graph, log_probs=log_probs)
-    W = nx.to_numpy_array(graph)
+    if isinstance(graph, nx.DiGraph):
+        graph = normalize_graph_weights(graph, log_probs=log_probs)
+        W = nx.to_numpy_array(graph)
+    elif isinstance(graph, np.ndarray):
+        W = graph.copy()
+        graph = nx.from_numpy_array(graph)
+    W0 = W.copy()
+
     if log_probs:
-        # filter probs that are too low and take exp
-        min_log_weight = np.log(np.nextafter(0, 1))
-        W[W < min_log_weight] = -np.inf
-        W = np.exp(W)
+        logW = W.copy()
+        W = stable_matrix_exp(logW)
         graph = reset_adj_matrix(graph, W)
-        graph = normalize_graph_weights(graph, log_probs=False)
+        W0 = logW
 
     nodes_perm = [i for i in range(W.shape[1])]
     if root != 0:
@@ -169,7 +140,8 @@ def colbourn_rst(graph: nx.DiGraph, root=0, log_probs: bool = False):
 
     tree = nx.relabel_nodes(tree, {i: nodes_perm[i] for i in range(W.shape[1])})
     for e in tree.edges():
-        tree.edges()[e]['weight'] = graph.edges()[e]['weight']
+        # set the weight of the edge to the original weight
+        tree.edges()[e]['weight'] = W0[e[0], e[1]]
     return tree
 
 
@@ -231,6 +203,7 @@ def _colbourn_tree_from_matrix(W: np.ndarray) -> nx.DiGraph:
     np.fill_diagonal(A, 0)
     # Kirchoff matrix
     L = _koo_laplacian(A, r)
+    #print("Laplacian condition number: ", np.linalg.cond(L))
     B = np.linalg.inv(L).transpose()
     tree = nx.DiGraph()
 

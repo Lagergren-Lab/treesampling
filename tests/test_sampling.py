@@ -358,7 +358,7 @@ def test_wilson_4_nodes():
         return np.prod([matrix[u, v] for u, v in tree.edges()])
 
     K = 4
-    N = 10000
+    N = 100000
     # random matrix
     W = np.random.uniform(0, 1, size=(K, K))
     np.fill_diagonal(W, 0)
@@ -407,7 +407,7 @@ def test_castaway_4_nodes():
         return np.prod([matrix[u, v] for u, v in tree.edges()])
 
     K = 4
-    N = 10000
+    N = 100000
     # random matrix
     W = np.random.uniform(0, 1, size=(K, K))
     np.fill_diagonal(W, 0)
@@ -455,7 +455,7 @@ def test_castaway_log_4_nodes():
         return np.sum([matrix[u, v] for u, v in tree.edges()])
 
     K = 4
-    N = 10000
+    N = 100000
     # random matrix
     W = np.random.uniform(0, 1, size=(K, K))
     np.fill_diagonal(W, 0)

@@ -5,15 +5,18 @@ import networkx as nx
 import numpy as np
 
 from treesampling import TreeSampler
-from treesampling.utils.graphs import normalize_graph_weights, tree_to_newick, random_uniform_graph
+from treesampling.utils.graphs import normalize_graph_weights, tree_to_newick, random_uniform_graph, tuttes_determinant, tree_weight
 from treesampling.utils.math import StableOp
 
 
 class WxTable:
-    def __init__(self, x: list, graph: nx.DiGraph, log_probs: bool = False, cache_size: int = 1, **kwargs):
+    def __init__(self, x: list, weights: np.ndarray = None, log_probs: bool = False, cache_size: int = 1, **kwargs):
         self.op = StableOp(log_probs=log_probs)  # dispatch stable operations
+        if weights is None:
+            self.logger.warning("graph parameter is deprecated, just use weight matrix")
+            self.weights = kwargs.get("graph")
         self.x = x
-        self.graph = graph
+        self.weights = weights
         self.logger = logging.getLogger(self.__class__.__name__)
         self.logger.setLevel(logging.INFO)
         self.debug = kwargs.get('debug', False)
@@ -40,7 +43,7 @@ class WxTable:
 
     def _build(self) -> dict:
         # graph weights
-        gw = nx.to_numpy_array(self.graph)
+        gw = self.weights
 
         # base step: x = [v] (first node)
         v = self.x[0]
@@ -154,7 +157,7 @@ class WxTable:
         return self.wx_dict
 
     def to_array(self):
-        wx_arr = wx_dict_to_array(self.wx_dict, self.graph.number_of_nodes())
+        wx_arr = wx_dict_to_array(self.wx_dict, self.weights.shape[0])
         return wx_arr
 
     def reset(self):
@@ -211,10 +214,10 @@ def wx_dict_to_array(wx_dict: dict, n_nodes: int) -> np.ndarray:
 
 class CastawayRST(TreeSampler):
 
-    def __init__(self, graph: nx.DiGraph, root: int, log_probs: bool = False, trick: bool = True, **kwargs):
+    def __init__(self, graph: nx.DiGraph | np.ndarray, root: int, log_probs: bool = False, trick: bool = True, **kwargs):
         """
         Initialize the Castaway Random Spanning Tree sampler.
-        :param graph: nx.DiGraph with weights on arcs
+        :param graph: nx.DiGraph with weights on arcs, or np.ndarray matrix of graph weights
         :param root: label of the root in the graph
         :param log_probs: boolean, if the graph has log-weights
         :param trick: boolean, if True, the algorithm runs in O(n^3) by efficiently updating the W table. Otherwise W
@@ -222,7 +225,6 @@ class CastawayRST(TreeSampler):
         :param kwargs: additional arguments
         """
         super().__init__(graph, root, log_probs, **kwargs)
-        self.op = StableOp(log_probs=self.log_probs)
         self.trick = trick
         self.logger = logging.getLogger(self.__class__.__name__)
         self.logger.setLevel(logging.INFO)
@@ -230,14 +232,13 @@ class CastawayRST(TreeSampler):
         if self.debug:
             self.logger.setLevel(logging.DEBUG)
 
-        # FIXME: sampler should take a matrix as input and construct the graph itself
-        #   NOTE: nx.from_numpy_array only adds edges with weight != 0, which means it is not suited for log probs
-        self._adjust_graph()
+        #self._adjust_graph()
         # initialize x set to all nodes except the root
-        self.x_list = list(set(self.graph.nodes()).difference([self.root]))
-        self.wx = WxTable(self.x_list, self.graph, log_probs=self.log_probs, debug=self.debug, cache_size=kwargs.get('cache_size', 1))
+        self.x_list = list(x for x in range(self.weights.shape[0]) if x != self.root)
+        self.wx = WxTable(self.x_list, self.weights, log_probs=self.log_probs, debug=self.debug, cache_size=kwargs.get('cache_size', 1))
 
     def _adjust_graph(self):
+        # FIXME: remove
         # add missing edges with null weight and normalize
         missing_edges = nx.difference(nx.complete_graph(self.graph.number_of_nodes()), self.graph)
         self.graph.add_edges_from([(u, v, {'weight': self.op.zero()}) for u, v in missing_edges.edges()])
@@ -277,34 +278,36 @@ class CastawayRST(TreeSampler):
         return trees
 
     def sample_tree(self) -> nx.DiGraph:
-        return self.castaway_rst()
+        tree = self.castaway_rst()
 
-    def castaway_rst(self) -> nx.DiGraph:
+        tree_nx = nx.DiGraph()
+        for j, i in enumerate(tree):
+            if i != -1:
+                tree_nx.add_weighted_edges_from([(i, j, {'weight': self.weights[i, j]})])
+        assert nx.is_arborescence(tree_nx)
+        return  tree_nx
+
+    def sample_tree_as_list(self) -> list[int]:
+        tree = self.castaway_rst()
+        return tree
+
+    def castaway_rst(self) -> list[int]:
         """
         Wrapper for the original random spanning tree sampler inspired by Wilson algorithm.
-        :param graph: nx.DiGraph, with weights on arcs
-        :param root: label of the root in the graph
-        :param log_probs: if the graph has log-weights
-        :param trick: if True, the algorithm runs in O(n^3) by efficiently updating the W table. Otherwise W
-            is computed from scratch every time a new arc is added to the tree
-        :return:
         """
         # reset wx table
         self.x_list = list(set(self.graph.nodes()).difference([self.root]))
         self.wx.reset()
 
         tree = self._castaway()
-        assert nx.is_arborescence(tree), "Tree is not an arborescence"
         return tree
 
-    def _castaway(self) -> nx.DiGraph:
+    def _castaway(self) -> list[int]:
         """
         Sample one tree from a given graph with fast arborescence sampling algorithm.
-        :return: nx.DiGraph, arborescence T with P(T) \propto w(T)
+        :return: list of length num_nodes with parent idx for each node. root node has -1
         """
-        # initialize tree with root
-        tree = nx.DiGraph()
-        tree.add_node(self.root)
+        tree = [-1] * self.weights.shape[0]
 
         dangling_path: list[tuple] = []  # store dangling path branch (not yet attached to tree, not in X)
         # iterate for each node
@@ -315,8 +318,8 @@ class CastawayRST(TreeSampler):
             self.logger.debug("Picking new node i...")
             if not dangling_path:
                 # NOTE: stochastic vs sorted choice (should not matter)
-                # i_vertex = random.choice(self.wx.x)
-                i_vertex = self.wx.x[0]
+                i_vertex = np.random.choice(self.wx.x)
+                # i_vertex = self.wx.x[0]
                 self.logger.debug(f"- No dangling path, picking node {i_vertex} from x set")
             # or set i to be last node
             else:
@@ -331,18 +334,20 @@ class CastawayRST(TreeSampler):
             # for each node in either S or X - u, compute the probability of direct arc u -> i
             # nodes_lab, w_choice = self._compute_lexit_table(i_vertex, self.wx.x, self.wx.get_wx(), tree)
             # O(n^2)
-            u_vertex, origin_lab = self._pick_u(i_vertex, [n for n in tree.nodes()])
-            dangling_path.append((u_vertex, i_vertex, self.graph.edges()[u_vertex, i_vertex]['weight']))
-            if origin_lab == 't':
+            tree_nodes = [j for j, i in enumerate(tree) if i != -1] + [self.root]
+            u_vertex = self._pick_u(i_vertex, tree_nodes)
+            dangling_path.append((u_vertex, i_vertex))
+            if u_vertex in tree_nodes:
                 # if u picked from tree, attach dangling path and reset
                 # add dangling path edges to tree
-                tree.add_weighted_edges_from(dangling_path)
+                for i, j in dangling_path:
+                    tree[j] = i
                 dangling_path = []
 
         # no more nodes in x set, the tree is complete
         return tree
 
-    def _pick_u(self, i: int, tree_nodes: list) -> tuple[list, np.ndarray]:
+    def _pick_u(self, i: int, tree_nodes: list) -> int:
         """
         Compute the probability of a direct connection in the tree
         from any node (u) in the tree or in the x set to the new node i.
@@ -353,25 +358,23 @@ class CastawayRST(TreeSampler):
         """
         assert i not in self.wx.x
 
-        w_choice, nodes = self._compute_lexit_probs(i, tree_nodes)
+        w_choice = self._compute_lexit_probs(i, tree_nodes)
 
         # pick u proportionally to lexit_i(u)
-        u_idx = self.op.random_choice(w_choice) # random choice (if log_probs, uses gumbel trick)
-        u_vertex, origin_lab = nodes[u_idx]
-        self.logger.debug(f"- Picking node u = {u_vertex} from w_choice: {w_choice} (origin: {origin_lab})")
+        u_vertex = self.op.random_choice(w_choice) # random choice (if log_probs, uses gumbel trick)
+        self.logger.debug(f"- Picking node u = {u_vertex} from w_choice: {w_choice} (origin: {'t' if u_vertex in tree_nodes else 'x'})")
 
-        return u_vertex, origin_lab  # (u, origin) node label and origin ('t' or 'x')
+        return u_vertex
 
-    def _compute_lexit_probs(self, i, tree_nodes) -> tuple[np.ndarray, list]:
+    def _compute_lexit_probs(self, i, tree_nodes) -> np.ndarray:
         """
         Compute the probability of a direct connection from any node (u) in the tree or in the x set to the new node i.
         :param i: int, exit node
         :param tree_nodes: list, nodes already in the tree
-        :return: tuple, weights for random choice and list of nodes label and source str ('t' or 'x')
+        :return: weights for random choice at each node
         """
-        gw = nx.to_numpy_array(self.graph)
-        nodes = []  # tuples (node, source) - source can be 'x' or 't'
-        w_choice = []  # weights for random choice at each node
+        gw = self.weights
+        w_choice = [self.op.zero()] * self.weights.shape[0]
 
         # probability of any u in V(T) U X to be the next connection to i
         # attachment from tree to any node in X
@@ -381,8 +384,7 @@ class CastawayRST(TreeSampler):
             pattach[v] = self.op.add([gw[w, v] for w in tree_nodes])
         # for tree nodes as origin, probability is barely the weight of the arc
         for u in tree_nodes:
-            nodes.append((u, 't'))
-            w_choice.append(gw[u, i])
+            w_choice[u] = gw[u, i]
         # for x nodes as origin, probability is the sum of all paths from any w in T to u (through any v in X)
         # O(n^2)
         for u in self.wx.x:
@@ -390,24 +392,148 @@ class CastawayRST(TreeSampler):
             # any w, v (from tree to X) * any v, u (from X to i) * p(u, i)
             p_tree_u_i = self.op.mul(
                 [self.op.add([self.op.mul([pattach[v], self.wx.wx_dict[v, u]]) for v in self.wx.x]), gw[u, i]])
-            nodes.append((u, 'x'))
-            w_choice.append(p_tree_u_i)
+            w_choice[u] = p_tree_u_i
         # print(f"unnormalized choices:{w_choice} {nodes}, i: {i}")
-        w_choice = self.op.normalize(w_choice)
-        return w_choice, nodes
+        return self.op.normalize(w_choice)
+
+
+def test():
+    n_seeds = 100
+    N = 10000
+    k = 4
+    acc = 0
+    for i in range(n_seeds):
+        X = np.random.uniform(0, 1, size=(k, k))
+        # setup matrix
+        np.fill_diagonal(X, 0)
+        X[:, 0] = 0.
+        X[:, 1:] = X[:, 1:] / np.sum(X[:, 1:], axis=0)
+        # compute total trees weight
+        Z = tuttes_determinant(X)
+        # print(f"total weight: {Z}")
+
+        # save frequencies and weight of each new tree
+        sampler = CastawayRST(X, root=0, trick=False)
+        dist = {}
+        for i in range(N):
+            tree = tuple(sampler.sample_tree_as_list())
+            if tree not in dist:
+                dist[tree] = 0
+            dist[tree] += 1 / N
+
+        for tree in dist:
+            prob = tree_weight(tree, X) / Z
+            acc += 1 if np.isclose(dist[tree], prob, rtol=.1) else 0
+            # print(f"tree: {tree}, prob: {prob}, freq: {dist[tree]}")
+    print(acc / (len(dist) * n_seeds) * 100, "% of trees have been sampled correctly")
+
+def test_log():
+    print("Testing CastawayRST with log probabilities...")
+    n_seeds = 100
+    N = 10000
+    k = 4
+    acc = 0
+    for i in range(n_seeds):
+        X = np.random.uniform(0, 1, size=(k, k))
+        # setup matrix
+        np.fill_diagonal(X, 0)
+        X[:, 0] = 0.
+        X[:, 1:] = X[:, 1:] / np.sum(X[:, 1:], axis=0)
+        # compute total trees weight
+        Z = tuttes_determinant(X)
+        # print(f"total weight: {Z}")
+
+        # save frequencies and weight of each new tree
+        sampler = CastawayRST(np.log(X), root=0, trick=False, log_probs=True)
+        dist = {}
+        for i in range(N):
+            tree = tuple(sampler.sample_tree_as_list())
+            if tree not in dist:
+                dist[tree] = 0
+            dist[tree] += 1 / N
+
+        for tree in dist:
+            prob = tree_weight(tree, X) / Z
+            acc += 1 if np.isclose(dist[tree], prob, rtol=.1) else 0
+            # print(f"tree: {tree}, prob: {prob}, freq: {dist[tree]}")
+    print(acc / (len(dist) * n_seeds) * 100, "% of trees have been sampled correctly")
+
+def test_trick():
+    print("Testing CastawayRST trick -> O(n^3)...")
+    n_seeds = 100
+    N = 10000
+    k = 4
+    acc = 0
+    for i in range(n_seeds):
+        X = np.random.uniform(0, 1, size=(k, k))
+        # setup matrix
+        np.fill_diagonal(X, 0)
+        X[:, 0] = 0.
+        X[:, 1:] = X[:, 1:] / np.sum(X[:, 1:], axis=0)
+        # compute total trees weight
+        Z = tuttes_determinant(X)
+        # print(f"total weight: {Z}")
+
+        # save frequencies and weight of each new tree
+        sampler = CastawayRST(X, root=0, trick=True)
+        dist = {}
+        for i in range(N):
+            tree = tuple(sampler.sample_tree_as_list())
+            if tree not in dist:
+                dist[tree] = 0
+            dist[tree] += 1 / N
+
+        for tree in dist:
+            prob = tree_weight(tree, X) / Z
+            acc += 1 if np.isclose(dist[tree], prob, rtol=.1) else 0
+            # print(f"tree: {tree}, prob: {prob}, freq: {dist[tree]}")
+    print(acc / (len(dist) * n_seeds) * 100, "% of trees have been sampled correctly")
+
+
+def test_log_trick():
+    print("Testing CastawayRST trick -> O(n^3) with log probabilities...")
+    n_seeds = 100
+    N = 10000
+    k = 4
+    acc = 0
+    for i in range(n_seeds):
+        X = np.random.uniform(0, 1, size=(k, k))
+        # setup matrix
+        np.fill_diagonal(X, 0)
+        X[:, 0] = 0.
+        X[:, 1:] = X[:, 1:] / np.sum(X[:, 1:], axis=0)
+        # compute total trees weight
+        Z = tuttes_determinant(X)
+        # print(f"total weight: {Z}")
+
+        # save frequencies and weight of each new tree
+        sampler = CastawayRST(np.log(X), root=0, trick=True, log_probs=True)
+        dist = {}
+        for i in range(N):
+            tree = tuple(sampler.sample_tree_as_list())
+            if tree not in dist:
+                dist[tree] = 0
+            dist[tree] += 1 / N
+
+        for tree in dist:
+            prob = tree_weight(tree, X) / Z
+            acc += 1 if np.isclose(dist[tree], prob, rtol=.1) else 0
+            # print(f"tree: {tree}, prob: {prob}, freq: {dist[tree]}")
+    print(acc / (len(dist) * n_seeds) * 100, "% of trees have been sampled correctly")
 
 
 if __name__ == '__main__':
-    # debug algorithm steps
-    np.random.seed(42)
-    # random graph
-    g = random_uniform_graph(5, log_probs=False, normalize=True)
-    sampler = CastawayRST(graph=g, root=0, log_probs=False, trick=True, debug=True)
-    logging.debug("Running CastawayRST on random graph (non log) with trick")
-    print("Wx matrix")
-    print(sampler.wx.to_array())
-    tree = sampler.sample_tree()
-    logging.debug(f"tree_to_newick(tree): {tree_to_newick(tree)}")
+    test_log_trick()
+    # # debug algorithm steps
+    # np.random.seed(42)
+    # # random graph
+    # g = random_uniform_graph(5, log_probs=False, normalize=True)
+    # sampler = CastawayRST(graph=g, root=0, log_probs=False, trick=True, debug=True)
+    # logging.debug("Running CastawayRST on random graph (non log) with trick")
+    # print("Wx matrix")
+    # print(sampler.wx.to_array())
+    # tree = sampler.sample_tree()
+    # logging.debug(f"tree_to_newick(tree): {tree_to_newick(tree)}")
 
 
 
