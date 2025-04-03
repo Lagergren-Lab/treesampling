@@ -351,14 +351,13 @@ def cayleys_formula(n):
     assert n > 1
     return n**(n-2)
 
-def nxtree_from_array(t: np.ndarray):
+def nxtree_from_list(t: list) -> nx.DiGraph:
     """
-    Convert a tree array to nx.DiGraph. Assumes the tree is rooted at 0.
-    :param t: array of shape (n_nodes,)
+    Convert a tree parent list to nx.DiGraph. Root has parent -1.
+    :param t: list of length n_nodes
     :return: nx.DiGraph
     """
-    n = len(t) + 1
     tree = nx.DiGraph()
-    for i, p in enumerate(t):
+    for i, p in enumerate(t[1:]):
         tree.add_edge(p, i + 1)
     return tree

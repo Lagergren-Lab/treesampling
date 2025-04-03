@@ -18,8 +18,10 @@ def wilson_rst(graph: nx.DiGraph, root: int, log_probs: bool = False) -> nx.DiGr
     Wr = np.roll(Wr, -root, axis=1)
     # sample tree
     tree = wilson_rst_from_matrix(Wr, log_probs)
-    # swap back
+    # swap back to original root relabeling nodes
+    # FIXME: this is not correct, not only root should be swapped, but also the other nodes
     tree = np.roll(tree, root)
+
     # build tree
     tree_nx = nx.DiGraph()
     for j, i in enumerate(tree):

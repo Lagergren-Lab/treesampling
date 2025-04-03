@@ -1,6 +1,6 @@
 """
 Take an interesting matrix from VICTree execution, compute the total weight via brute force and use it for
-assessing sampling correctness.
+assessing sampling correctness for the CastawayRST algorithm.
 """
 import heapq
 import itertools
@@ -8,10 +8,20 @@ import logging
 
 import networkx as nx
 import numpy as np
+import scipy.special as sp
 
-from treesampling.algorithms import CastawayRST
+from treesampling.algorithms.castaway import importance_sample
+# from treesampling.algorithms import CastawayRST
+from treesampling.algorithms.castaway_reboot import CastawayRST
 from treesampling.utils.graphs import tree_weight, cayleys_formula, tree_to_newick
 
+
+def parlist_to_newick(parlist):
+    tree = nx.DiGraph()
+    for i, p in enumerate(parlist):
+        if p != -1:
+            tree.add_edge(p, i)
+    return tree_to_newick(tree)
 
 def prufer_to_rooted_parent(prufer):
     nx_tree = nx.from_prufer_sequence(prufer)
@@ -52,10 +62,10 @@ def get_true_pmf(matrix, cutoff_p=0.99999, cutoff_k=1000):
     # normalize weights
     print(f"First {p * 100}% of trees:")
     acc = 0.
-    top_trees = []  # either limited by K or by the p-th percentile
+    top_trees = {}  # either limited by K or by the p-th percentile
     for i, (w, t, nwk) in enumerate(heapq.nlargest(K, top_k_trees)):
         norm_tree_weight = np.exp(w - tot_weight)
-        top_trees.append((w, norm_tree_weight, t, nwk))
+        top_trees[nwk] = (w, norm_tree_weight, t)
         acc += norm_tree_weight
         if acc < p:
             print(f"Tree {i}: {w} {norm_tree_weight} {t} - newick: {nwk}")
@@ -76,17 +86,55 @@ def main():
         [-np.inf, -131.7  , -25.589, -115.073, -59.796, -109.966, -np.inf]
     ])
     true_pmf = get_true_pmf(matrix, cutoff_p=0.99999, cutoff_k=1000)
-    edge_occurrency = np.zeros_like(matrix)
-    for _, norm_weight, tree, _ in true_pmf:
+    graph = nx.DiGraph()
+    for i, j in itertools.product(range(matrix.shape[0]), repeat=2):
+        if i != j and j != 0:
+            graph.add_edge(i, j, weight=matrix[i, j])
+    mst_nwk = tree_to_newick(nx.maximum_spanning_arborescence(graph))
+    print(f"MST: {mst_nwk}")
+    edge_occurrence = np.zeros_like(matrix)
+    for _, norm_weight, tree in true_pmf.values():
         for i in range(1, len(tree)):
-            edge_occurrency[tree[i], i] += norm_weight
-    print(np.array_str(edge_occurrency, max_line_width=100, precision=3, suppress_small=True))
+            edge_occurrence[tree[i], i] += norm_weight
+    print(np.array_str(edge_occurrence, max_line_width=100, precision=3, suppress_small=True))
 
-    # sample with debug on
-    sampler = CastawayRST(matrix, root=0, log_probs=True, debug=True)
-    sampler.sample_tree_as_list()
+    # sample trees with CastawayRST
+    sampler = CastawayRST(matrix, 0, log_probs=True, trick=False, debug=False)
+    # tree = sampler.castaway_rst()
+    # print(f"CastawayRST tree: {parlist_to_newick(tree)}")
+    trees = sampler.sample(n_samples=1000)
+    print("Crasher trick:")
+    # for i, tree in enumerate(trees):
+    #     nwk = parlist_to_newick(tree)
+    #     freq = tree_weight(tree, matrix, log_probs=True) - sampler.tot_weight
+    #     print(f"tree {i}: {nwk} ({np.exp(freq)} | true: {true_pmf[nwk][1]} | iw: {freq})")
+    print("Sampled trees:", sorted(trees.items(), key=lambda u: u[1], reverse=True))
+
+    # importance samples with tempering
+    for temp in [2, 5, 10, 50, 100]:
+        print(f"temp: {temp}")
+        try:
+            trees = importance_sample(matrix, 100, temp=temp, log_probs=True)
+        except Exception as e:
+            print(f"Error: {e} -- skipping temperature {temp}")
+            continue
+
+        tot_weight = sp.logsumexp([w for w in trees.values()])
+        max_print = len(true_pmf)
+        i = 0
+        for tree in sorted(trees, key=trees.get, reverse=True):
+            nwk = parlist_to_newick(tree)
+            freq = trees[tree] - tot_weight
+
+            # if true weight is available, compare it
+            true_weight = 0. if nwk not in true_pmf else true_pmf[nwk][1]
+            print(f"tree: {nwk} ({np.exp(freq)} | true: {true_weight} | iw: {freq})")
+            i += 1
+            if i >= max_print:
+                break
 
 
 if __name__ == "__main__":
+    np.random.seed(42)
     logging.basicConfig(level=logging.INFO)
     main()

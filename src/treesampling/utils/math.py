@@ -49,6 +49,12 @@ class StableOp:
         else:
             return arr / np.sum(arr, axis=axis, keepdims=True)
 
+    def temper(self, arr, temp: float):
+        if self.log_probs:
+            return arr / temp
+        else:
+            return np.power(arr, 1 / temp)
+
 
 def logdiffexp(l1, l2):
     """

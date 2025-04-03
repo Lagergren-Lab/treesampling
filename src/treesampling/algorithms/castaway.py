@@ -5,18 +5,20 @@ import networkx as nx
 import numpy as np
 
 from treesampling import TreeSampler
-from treesampling.utils.graphs import normalize_graph_weights, tree_to_newick, random_uniform_graph, tuttes_determinant, tree_weight
+from treesampling.utils.graphs import normalize_graph_weights, tree_to_newick, random_uniform_graph, tuttes_determinant, \
+    tree_weight, graph_weight
 from treesampling.utils.math import StableOp
 
 
 class WxTable:
-    def __init__(self, x: list, weights: np.ndarray = None, log_probs: bool = False, cache_size: int = 1, **kwargs):
+    def __init__(self, x: list, weights: np.ndarray = None, root: int = 0, log_probs: bool = False, cache_size: int = 1, **kwargs):
         self.op = StableOp(log_probs=log_probs)  # dispatch stable operations
         self.logger = logging.getLogger(self.__class__.__name__)
         self.logger.setLevel(logging.INFO)
         if weights is None:
             self.logger.warning("graph parameter is deprecated, just use weight matrix")
             self.weights = kwargs.get("graph")
+        self.root = root
         self.x = x
         self.weights = weights.copy()
         self.debug = kwargs.get('debug', False)
@@ -45,13 +47,21 @@ class WxTable:
         # graph weights
         gw = self.weights
 
-        # base step: x = [v] (first node)
-        v = self.x[0]
-        wx = {(v, v): self.op.one()}
-        self.logger.debug(f"\t- Initializing Wx table with node {v}: wx = {wx}")
-        for i in range(1, len(self.x)):
-            x = self.x[:i]
-            u = self.x[i]
+        x_list = self.x
+        # TEST: order x set by node out-degree among nodes in x
+        x_order = np.argsort(self.op.add(gw[:, x_list], axis=1)).tolist()
+        x_list = [i for i in x_order if i in x_list]
+        self.logger.debug(f"\t- Order of x set: {x_list}")
+
+        # base step: x = (first node)
+        v0 = x_list[0]
+        wx = {(v0, v0): self.op.one()}
+        self.logger.debug(f"\t- Initializing Wx table with node {v0}: wx = {wx}")
+        # for i in range(1, len(x_list)):
+        i = 1
+        while len(wx) < len(x_list) ** 2:
+            x = x_list[:i]
+            u = x_list[i]
             # Y = X U { u }
             wy = {}
             # compute Ry(u) where u is Y \ X (u)
@@ -61,12 +71,7 @@ class WxTable:
                 ry_1 = self.op.add([ry_1, self.op.mul([gw[u, v], wx[v, w], gw[w, u]])])
                 # log: logaddexp(ry_1, gw[u, v] + wx[v, w] + gw[w, u])
             self.logger.debug(f"\t- Ry(u, 1) for node {u} in Y = {x}: {ry_1}")
-            try:
-                ry = self.op.div(self.op.one(), self.op.sub(self.op.one(), ry_1))
-            except ValueError as ve:
-                self.logger.error(f"Error computing Ry(u) = 1 / (1 - Ry_1(u))")
-                self.logger.error(f"Ry_1(u) = {ry_1}")
-                raise ve
+            ry = self.op.div(self.op.one(), self.op.sub(self.op.one(), ry_1))
             # log: -np.log(1 - np.exp(ry_1))
             self.logger.debug(f"\t- Ry(u) for node {u} in Y = {x}: {ry}")
 
@@ -102,6 +107,7 @@ class WxTable:
             self.logger.debug(f"\t- Updated Wx table with node {u}")
 
             self._update_cache(wx, x)
+            i += 1
         return wx
 
     def update(self, u, trick=False):
@@ -235,31 +241,7 @@ class CastawayRST(TreeSampler):
         #self._adjust_graph()
         # initialize x set to all nodes except the root
         self.x_list = list(x for x in range(self.weights.shape[0]) if x != self.root)
-        self.wx = WxTable(self.x_list, self.weights, log_probs=self.log_probs, debug=self.debug, cache_size=kwargs.get('cache_size', 1))
-
-    def _adjust_graph(self):
-        # FIXME: remove
-        # add missing edges with null weight and normalize
-        missing_edges = nx.difference(nx.complete_graph(self.graph.number_of_nodes()), self.graph)
-        self.graph.add_edges_from([(u, v, {'weight': self.op.zero()}) for u, v in missing_edges.edges()])
-        not_normalized = False
-        # if weights are normalized, check for forced edges with weight 1
-        for i in range(self.graph.number_of_nodes()):
-            # when sum is close to one, and one single edge has weight 1, then
-            # all other edges should never be sampled (set their weight to 0)
-            if np.isclose(self.op.add(nx.to_numpy_array(self.graph)[:, i].tolist()), self.op.one()):
-                # check whether there is a node with weight 1.
-                if np.any(np.isclose(nx.to_numpy_array(self.graph)[:, i], self.op.one())):
-                    j = np.argwhere(np.isclose(nx.to_numpy_array(self.graph)[:, i], self.op.one()))[0][0]
-                    self.logger.warning(f"edge {j} -> {i} has weight 1.0, all other edges in node {i} will be set to 0.")
-                    for k in range(self.graph.number_of_nodes()):
-                        if k != j:
-                            self.graph.edges()[k, i]['weight'] = self.op.zero()
-            else:
-                not_normalized = True
-        # normalize graph weights
-        if not_normalized:
-            self.graph = normalize_graph_weights(self.graph, log_probs=self.log_probs)
+        self.wx = WxTable(self.x_list, self.weights, root=self.root, log_probs=self.log_probs, debug=self.debug, cache_size=kwargs.get('cache_size', 1))
 
     def sample(self, n_samples: int = 1) -> dict:
         """
@@ -269,12 +251,11 @@ class CastawayRST(TreeSampler):
         """
         trees = {}
         for _ in range(n_samples):
-            tree = self.castaway_rst()
-            tree_str = tree_to_newick(tree)
-            if tree_str in trees:
-                trees[tree_str] += 1
+            tree = tuple(self.castaway_rst())
+            if tree in trees:
+                trees[tree] += 1
             else:
-                trees[tree_str] = 1
+                trees[tree] = 1
         return trees
 
     def sample_tree(self) -> nx.DiGraph:
@@ -395,6 +376,28 @@ class CastawayRST(TreeSampler):
             w_choice[u] = p_tree_u_i
         # print(f"unnormalized choices:{w_choice} {nodes}, i: {i}")
         return self.op.normalize(w_choice)
+
+def importance_sample(matrix, n, temp=1., log_probs: bool = False, trick: bool = False):
+    """
+    Importance sampling for random spanning trees.
+    :param matrix: np.ndarray, matrix of weights
+    :param n: int, number of samples
+    :param temp: float, temperature parameter
+    :return: dict, (tree_tuple, iw) where tree_tuple is the parent-list representation of the tree
+        (i.e. t_i is parent of node i, if t_i = -1, node i is the root)
+    """
+    op = StableOp(log_probs)
+    orig_w = matrix.copy()
+    matrix = op.temper(matrix, temp)
+    sampler = CastawayRST(matrix, root=0, log_probs=log_probs, trick=trick)
+    trees = {}
+    for _ in range(n):
+        tree = sampler.castaway_rst()
+        iw = op.div(tree_weight(tree, orig_w, log_probs=log_probs), tree_weight(tree, matrix, log_probs=log_probs))
+        t_id = tuple(tree)
+        trees[t_id] = op.add([trees.get(t_id, op.zero()), iw])
+
+    return trees
 
 
 def check():
