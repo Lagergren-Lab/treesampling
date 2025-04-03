@@ -1,4 +1,3 @@
-import logging
 import time
 import networkx as nx
 import numpy as np

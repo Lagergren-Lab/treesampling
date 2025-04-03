@@ -1,12 +1,9 @@
 import itertools
-import logging
 import random
 import networkx as nx
 import numpy as np
 
-from treesampling.algorithms import CastawayRST
-from treesampling.utils.graphs import reset_adj_matrix, random_tree_skewed_graph, tree_to_newick, \
-    random_block_matrix_graph, tuttes_determinant, tree_weight
+from treesampling.utils.graphs import reset_adj_matrix, tuttes_determinant, tree_weight
 from warnings import warn
 
 def random_spanning_tree(graph: nx.DiGraph, root=0) -> nx.DiGraph:
@@ -209,8 +206,8 @@ def _castaway_rst_log(weight_matrix: np.ndarray, root, trick=True) -> nx.DiGraph
     :param trick: if false, Wx gets re-computed every time
     :return: nx.DiGraph with tree edges only
     """
-    # print("BEGIN ALGORITHM")
-    # set non-existing edge weights to -inf
+    # ----------------------------
+    # PREPARE MATRIX FOR SAMPLING
     n_nodes = weight_matrix.shape[0]
     weights = np.copy(weight_matrix)
     weights[np.diag_indices(n_nodes)] = -np.inf
@@ -223,8 +220,9 @@ def _castaway_rst_log(weight_matrix: np.ndarray, root, trick=True) -> nx.DiGraph
     for u, v in itertools.product(range(n_nodes), repeat=2):
         if u != v and v != root and weight_matrix[u, v] != -np.inf:
             graph.add_edge(u, v, weight=weight_matrix[u, v])
-
-    # algorithm variables
+    # ----------------------------
+    # ALGORITHM
+    # variables
     tree = nx.DiGraph()
     tree.add_node(root)
     dangling_path: list[tuple] = []  # store dangling path branch (not yet attached to tree, not in X)
