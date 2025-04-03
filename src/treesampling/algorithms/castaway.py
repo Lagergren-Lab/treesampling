@@ -382,7 +382,8 @@ def importance_sample(matrix, n, temp=1., log_probs: bool = False, trick: bool =
     Importance sampling for random spanning trees.
     :param matrix: np.ndarray, matrix of weights
     :param n: int, number of samples
-    :param temp: float, temperature parameter
+    :param temp: float, temperature parameter, will apply w^(1 / temp) to the weights
+    :param log_probs: bool, whether weights matrix values are in log scale, if True, then w' = w / temp
     :return: dict, (tree_tuple, iw) where tree_tuple is the parent-list representation of the tree
         (i.e. t_i is parent of node i, if t_i = -1, node i is the root)
     """
