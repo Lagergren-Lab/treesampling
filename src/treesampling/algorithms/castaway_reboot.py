@@ -484,9 +484,156 @@ class CastawayRST(TreeSampler):
         self.logger.debug(f"Unnormalized choices:{w_choice} {self.wx.x}, i: {i}, crashers: {self.wx.crashers}")
         return self.op.normalize(w_choice)
 
-            dangling_path = []
-    return tree
+# VERSION WHICH SAMPLES CONNECTION FROM TREE TO X (last node to tree
+class Castaway2RST(CastawayRST):
+    """
+    Castaway2RST is a subclass of CastawayRST that implements the Castaway2 algorithm for sampling random spanning trees.
+    The algorithm is based on the original Castaway algorithm, but with a different _pick_u and _castaway methods.
+    """
 
+    def __init__(self, graph: nx.DiGraph | np.ndarray, root: int, log_probs: bool = False, trick: bool = True, **kwargs):
+        super().__init__(graph, root, log_probs=log_probs, trick=trick, **kwargs)
+
+    def _castaway(self) -> list[int]:
+        """
+        Sample one tree from a given graph with fast arborescence sampling algorithm.
+        :return: list of length num_nodes with parent idx for each node. root node has -1
+        """
+        tree = [-1] * self.weights.shape[0]
+
+        # iterate for each node
+        self.logger.debug(f"Starting Castaway2RST with x set: {self.wx.x} ({len(self.wx.x)} nodes) and crasher(s): {self.wx.crashers}")
+        while tree.count(-1) > 1:
+            tree_nodes = [j for j, i in enumerate(tree) if i != -1] + [self.root]
+            o, k = self._pick_ok()  # pick arc from tree (o) to x (k)
+            tree[k] = o
+            if k in self.wx.x:
+                self.wx.update(k, trick=self.trick)
+            elif k in self.wx.crashers:
+                self.wx.crashers.remove(k)
+                self.logger.debug(f"RW starting from crasher node {k}, removing node {k} from crasher set... (remaining: {self.wx.crashers})")
+            else:
+                raise ValueError(f"Node {k} is not in x set or crasher set")
+
+        # no more nodes in x set, the tree is complete
+        # check if tree is valid
+        if self.debug:
+            assert len(tree) == self.weights.shape[0], f"Tree has {len(tree)} nodes, expected {self.weights.shape[0]}"
+            assert tree.count(-1) == 1, f"Tree has {tree.count(-1)} roots, expected 1"
+            for i, p in enumerate(tree):
+                if p != -1:
+                    assert p < self.weights.shape[0], f"Parent node {p} of node {i} is out of bounds (max {self.weights.shape[0] - 1})"
+        self.logger.debug(f"- Tree sampled: {tree}\n***\n")
+        return tree
+
+    def _pick_ok(self):
+        add = self.op.add
+        mul = self.op.mul
+        PX = self.wx.wx_dict
+        w = self.weights
+
+        tree_nodes = [v for v in range(self.weights.shape[0]) if v not in self.wx.x + self.wx.crashers]
+
+        # crasher contributions
+        A = {}  # probability of exiting via k->o starting from c
+        B = {}
+        for c in self.wx.crashers:
+            A[c] = {}
+            B[c] = add([mul([PX[v, u], w[c, v]]) for u, v in itertools.product(self.wx.x, repeat=2)])
+            for k in self.wx.x:
+                for o in tree_nodes:
+                    A[c][k, o] = add([mul([w[v, c], PX[k, v], w[o, k]]) for v in self.wx.x])
+
+        arcs = []
+        w_choice = []
+        for o in tree_nodes:
+            for k in self.wx.x:
+                # with no crashers
+                # qko_no_c = mul([w[o, k], add([mul([PX[k, u], w[k, u]]) for u in self.wx.x])])
+                qko_no_c = add([mul([PX[k, u], w[o, k]]) for u in self.wx.x])
+                qko = qko_no_c
+                for c in self.wx.crashers:
+                    qko_c = mul([add([B[c], self.op.one()]), A[c][k, o]])
+                    qko = add([qko, qko_c])
+
+                w_choice.append(qko)
+                arcs.append((o, k))
+            for c in self.wx.crashers:
+                qco = mul([B[c], w[o, c]])
+                w_choice.append(qco)
+                arcs.append((o, c))
+
+        # pick u proportionally to w_choice
+        self.logger.debug(f"arcs: {arcs}\nw_choice: {w_choice}")
+        w_choice = self.op.normalize(w_choice)
+        arc_idx = self.op.random_choice(w_choice)
+        return arcs[arc_idx]
+
+def check():
+    n_seeds = 100
+    N = 10000
+    k = 4
+    acc = 0
+    for i in range(n_seeds):
+        X = np.random.uniform(0, 1, size=(k, k))
+        # setup matrix
+        np.fill_diagonal(X, 0)
+        X[:, 0] = 0.
+        X[:, 1:] = X[:, 1:] / np.sum(X[:, 1:], axis=0)
+        # compute total trees weight
+        Z = tuttes_determinant(X)
+        # print(f"total weight: {Z}")
+
+        # save frequencies and weight of each new tree
+        sampler = CastawayRST(X, root=0, trick=False)
+        dist = {}
+        for i in range(N):
+            tree = tuple(sampler.sample_tree_as_list())
+            if tree not in dist:
+                dist[tree] = 0
+            dist[tree] += 1 / N
+
+        for tree in dist:
+            prob = tree_weight(tree, X) / Z
+            acc += 1 if np.isclose(dist[tree], prob, rtol=.1) else 0
+            # print(f"tree: {tree}, prob: {prob}, freq: {dist[tree]}")
+    print(acc / (len(dist) * n_seeds) * 100, "% of trees have been sampled correctly")
+
+def check_log():
+    print("Testing CastawayRST with log probabilities...")
+    n_seeds = 100
+    N = 10000
+    k = 4
+    acc = 0
+    bar = tqdm(total=n_seeds * N)
+    for i in range(n_seeds):
+        X = np.random.uniform(0, 1, size=(k, k))
+        # setup matrix
+        np.fill_diagonal(X, 0)
+        X[:, 0] = 0.
+        X[:, 1:] = X[:, 1:] / np.sum(X[:, 1:], axis=0)
+        log_X = -np.inf * np.ones_like(X)
+        log_X[X > 0] = np.log(X[X > 0])
+        # compute total trees weight
+        Z = tuttes_determinant(X)
+        # print(f"total weight: {Z}")
+
+        # save frequencies and weight of each new tree
+        sampler = Castaway2RST(log_X, root=0, trick=False, log_probs=True, debug=False)
+        assert not sampler.wx.init_crashers
+        dist = {}
+        for i in range(N):
+            tree = tuple(sampler.sample_tree_as_list())
+            if tree not in dist:
+                dist[tree] = 0
+            dist[tree] += 1 / N
+            bar.update(1)
+
+        for tree in dist:
+            prob = tree_weight(tree, X) / Z
+            acc += 1 if np.isclose(dist[tree], prob, rtol=.1) else 0
+            # print(f"tree: {tree}, prob: {prob}, freq: {dist[tree]}")
+    print(acc / (len(dist) * n_seeds) * 100, "% of trees have been sampled correctly")
 
 def check_trick():
     print("Testing CastawayRST trick -> O(n^3)...")
