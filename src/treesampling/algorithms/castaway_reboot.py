@@ -499,21 +499,63 @@ class Castaway2RST(CastawayRST):
         Sample one tree from a given graph with fast arborescence sampling algorithm.
         :return: list of length num_nodes with parent idx for each node. root node has -1
         """
+        def pick_k(i, O):
+            # pick k from x set
+            kp = []
+            for u in self.wx.x:
+                sumO = self.weights[O[0], u]
+                if len(O) > 1:
+                    sumO = self.op.add([sumO] + [self.weights[o, u] for o in O[1:]])
+                kp.append(self.op.mul([self.wx.wx_dict[u, i], sumO]))
+            kp = self.op.normalize(kp)
+            k_idx = self.op.random_choice(kp)
+            k = self.wx.x[k_idx]
+            self.logger.debug(f"- [pick_k] Sampled k:{k} from x set")
+            return k
+
+        def pick_t(k, O):
+            if len(O) == 1:
+                t = O[0]
+                self.logger.debug(f"- [pick_t] Forced to pick t:{t} from O set")
+            else:
+                # pick t from tree
+                tp = self.op.normalize([self.weights[t, k] for t in O])
+                t_idx = self.op.random_choice(tp)
+                t = O[t_idx]
+                self.logger.debug(f"- [pick_t] Sampled t:{t} from T set")
+            return t
+
         tree = [-1] * self.weights.shape[0]
+        n_arcs = len(tree) - 1
 
         # iterate for each node
         self.logger.debug(f"Starting Castaway2RST with x set: {self.wx.x} ({len(self.wx.x)} nodes) and crasher(s): {self.wx.crashers}")
-        while tree.count(-1) > 1:
+        # INITIALIZE
+        i = np.random.choice(self.wx.x + self.wx.crashers)
+        O = [self.root]  # out-nodes, can be one node (the previous k) or the whole set of tree vertices
+        self.logger.debug(f"- [init] Picking node i:{i} from x set, setting O = {O}")
+        it = 0
+        while it < n_arcs:
+            # pick last node k to tree
+            k = pick_k(i, O)
+            # pick arc (tree -> k)
+            t = pick_t(k, O)
+            # add arc to tree
+            tree[k] = t
+            it += 1
+            self.logger.debug(f"- [arcs {it}/{n_arcs}] Adding arc {t} -> {k} to tree")
+            self.logger.debug(f"- Updating Wx table and removing node k:{k} from x set...")
+            self.wx.update(k, trick=self.trick)
             tree_nodes = [j for j, i in enumerate(tree) if i != -1] + [self.root]
-            o, k = self._pick_ok()  # pick arc from tree (o) to x (k)
-            tree[k] = o
-            if k in self.wx.x:
-                self.wx.update(k, trick=self.trick)
-            elif k in self.wx.crashers:
-                self.wx.crashers.remove(k)
-                self.logger.debug(f"RW starting from crasher node {k}, removing node {k} from crasher set... (remaining: {self.wx.crashers})")
+            if k == i and len(self.wx.x) > 0:
+                # pick new i and reset O
+                i = np.random.choice(self.wx.x)
+                self.logger.debug(f"- [end] End of walk (k = i). Picking new node i:{i} from x set, resetting O = {tree_nodes}")
+                O = tree_nodes.copy()
             else:
-                raise ValueError(f"Node {k} is not in x set or crasher set")
+                # have to end up in k
+                O = [k]
+                self.logger.debug(f"- [continue] Fix O = {O} to end up in k:{k} and continue walk from i:{i}")
 
         # no more nodes in x set, the tree is complete
         # check if tree is valid
