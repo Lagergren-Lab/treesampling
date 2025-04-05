@@ -130,28 +130,43 @@ class WxTable:
 
     def update(self, u, trick=False):
         """
-        Update the Wx table by removing the node u from the current x set (Y -> X).
+        Update the Wx table by removing the node u from the current x set (Y -> X). If the node is a crasher, it is removed
+        and the table is not updated.
         :param u: node to remove from the x set
         :param trick: boolean, if True, the algorithm runs in O(n^3) by efficiently updating the W table. Otherwise W
             is computed from scratch every time a new arc is added to the tree
         """
-        assert u in self.x, f"Node {u} not in x set prior to removal and update"
-        self.x = [v for v in self.x if v != u]
-
-        x_tuple = tuple(sorted(self.x))
-        if not self.x:
-            # if x is empty, table is empty
-            self.wx_dict = {}
-        elif self.cache_size > 1 and x_tuple in self._cached_tables:
-            # if the requested table has already been computed, avoid recomputing
-            self.wx_dict = self._cached_tables[x_tuple]
-            self._cache_hits[x_tuple] += 1
-        elif trick:
-            # remove node in O(n^2)
-            self.wx_dict = self._update_trick(u)
+        self.logger.debug(f"\t- Updating X = X - ({u})")
+        assert u in self.x + self.crashers, f"Node {u} not in x nor crashers set prior to removal and update"
+        if u in self.crashers:
+            self.logger.debug(f"\t- Remove crasher node {u} from crashers set...")
+            self.crashers = [v for v in self.crashers if v != u]
         else:
-            # recompute Wx from scratch in O(n^3)
-            self.wx_dict = self._build()
+            self.logger.debug(f"\t- Remove node {u} from x set and update table...")
+            self.x = [v for v in self.x if v != u]
+
+            # x is changed, recompute Wx table
+            x_tuple = tuple(sorted(self.x))
+            if not self.x:
+                # if x is empty, table is empty
+                self.wx_dict = {}
+            elif self.cache_size > 1 and x_tuple in self._cached_tables:
+                # if the requested table has already been computed, avoid recomputing
+                self.wx_dict = self._cached_tables[x_tuple]
+                self._cache_hits[x_tuple] += 1
+            elif trick:
+                # remove node in O(n^2)
+                try:
+                    self.wx_dict = self._update_trick(u)
+                except ValueError as ve:
+                    self.logger.warning(f"\t- Error updating Wx table with node {u} using trick,"
+                                        f" recomputing from scratch...")
+                    self.logger.warning(f"\t- If this is a recurrent error, consider disabling the diff-trick by setting"
+                                        f" trick=False as it may be numerically unstable.")
+                    self.wx_dict = self._build()
+            else:
+                # recompute Wx from scratch in O(n^3)
+                self.wx_dict = self._build()
         # no nans allowed
         assert not np.any([np.isnan(self.wx_dict[k]) for k in self.wx_dict]), f"NaN values in wx table: {self.wx_dict} at node {u}"
 
@@ -379,14 +394,7 @@ class CastawayRST(TreeSampler):
                 i_vertex = latest_edge[0]
                 self.logger.debug(f"- Proceed from dangling path {dangling_path} at node i={i_vertex}")
 
-            if i_vertex not in self.wx.crashers:
-                # update Wx table and remove x from x set
-                self.logger.debug(f"Updating Wx table and removing node {i_vertex} from x set...")
-                self.wx.update(i_vertex, trick=self.trick)
-            else:
-                # remove crasher node from crasher set
-                self.wx.crashers.remove(i_vertex)
-                self.logger.debug(f"RW starting from crasher node {i_vertex}, removing node {i_vertex} from crasher set... (remaining: {self.wx.crashers})")
+            self.wx.update(i_vertex, trick=self.trick)
 
             # for each node in X, compute the probability of a direct connection in the tree
             u_vertex = self._pick_u(i_vertex, tree_nodes)
@@ -501,15 +509,49 @@ class Castaway2RST(CastawayRST):
         """
         def pick_k(i, O):
             # pick k from x set
-            kp = []
-            for u in self.wx.x:
-                sumO = self.weights[O[0], u]
-                if len(O) > 1:
-                    sumO = self.op.add([sumO] + [self.weights[o, u] for o in O[1:]])
-                kp.append(self.op.mul([self.wx.wx_dict[u, i], sumO]))
-            kp = self.op.normalize(kp)
-            k_idx = self.op.random_choice(kp)
-            k = self.wx.x[k_idx]
+            # compute the probability of walking to k and jump out to the tree (probability of being last node)
+            # k can be a crasher, and the walk can visit a crasher
+            # sum of outgoing edges from k to O (which can be a single node)
+            sumO = {u: self.op.add([self.weights[o, u] for o in O]) if len(O) > 1 else self.weights[O[0], u] for u in self.wx.x + self.wx.crashers}
+            # probability of k being the last node in the tree walking from each u in x
+            RWO = {(k, u): self.op.mul([self.wx.wx_dict[k, u], sumO[k]]) for u in self.wx.x for k in self.wx.x}
+            kp = {}
+            if not self.wx.crashers:
+                for k in self.wx.x:
+                    # pick k from x set
+                    kp[k] = RWO[k, i]
+            # if there are crashers, update the kp probabilities and add c to the kp keys
+            else:
+                if i in self.wx.crashers:
+                    # change kp values
+                    # B1
+                    for k in self.wx.x:
+                        kp[k] = self.op.add([self.op.mul([self.weights[u, i], RWO[k, u]]) for u in self.wx.x])  # O(n^2)
+                    # B2
+                    kp[i] = sumO[i]
+                else:
+                    # add crashers to kp
+                    # A1
+                    for k in self.wx.x:
+                        kp[k] = self.op.add([
+                            self.op.mul([self.wx.wx_dict[u, i],
+                                         self.op.add([
+                                             self.op.mul([self.weights[c, u],
+                                                          self.op.add([
+                                                              self.op.mul([self.weights[v,c], RWO[k, v]])
+                                                              for v in self.wx.x])])
+                                             for c in self.wx.crashers])])
+                            for u in self.wx.x])  # O(n^2*c)
+                    # A2
+                    for c in self.wx.crashers:
+                        kp[c] = self.op.mul([self.op.add([self.op.mul([self.weights[c, u], self.wx.wx_dict[u, i]])
+                                                          for u in self.wx.x]),
+                                             sumO[c]])
+
+            kp_keys, kp_values = zip(*kp.items())
+            kp_choice = self.op.normalize(kp_values)
+            k_idx = self.op.random_choice(kp_choice)
+            k = kp_keys[k_idx]
             self.logger.debug(f"- [pick_k] Sampled k:{k} from x set")
             return k
 
@@ -544,13 +586,14 @@ class Castaway2RST(CastawayRST):
             tree[k] = t
             it += 1
             self.logger.debug(f"- [arcs {it}/{n_arcs}] Adding arc {t} -> {k} to tree")
-            self.logger.debug(f"- Updating Wx table and removing node k:{k} from x set...")
+            self.logger.debug(f"- Updating Wx table and removing node k:{k} from x set: {self.wx.x}...")
             self.wx.update(k, trick=self.trick)
             tree_nodes = [j for j, i in enumerate(tree) if i != -1] + [self.root]
             if k == i and len(self.wx.x) > 0:
                 # pick new i and reset O
-                i = np.random.choice(self.wx.x)
-                self.logger.debug(f"- [end] End of walk (k = i). Picking new node i:{i} from x set, resetting O = {tree_nodes}")
+                i = np.random.choice(self.wx.x + self.wx.crashers)
+                self.logger.debug(f"- [end] End of walk (k = i). Picking new node i:{i} from candidates set"
+                                  f" {'(crasher)' if i in self.wx.crashers else ''}, resetting O = {tree_nodes}")
                 O = tree_nodes.copy()
             else:
                 # have to end up in k

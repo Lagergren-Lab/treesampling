@@ -12,7 +12,7 @@ import scipy.special as sp
 
 from treesampling.algorithms.castaway import importance_sample
 # from treesampling.algorithms import CastawayRST
-from treesampling.algorithms.castaway_reboot import CastawayRST
+from treesampling.algorithms.castaway_reboot import CastawayRST, Castaway2RST
 from treesampling.utils.graphs import tree_weight, cayleys_formula, tree_to_newick
 
 
@@ -99,16 +99,15 @@ def main():
     print(np.array_str(edge_occurrence, max_line_width=100, precision=3, suppress_small=True))
 
     # sample trees with CastawayRST
-    sampler = CastawayRST(matrix, 0, log_probs=True, trick=False, debug=False)
+    # sampler = CastawayRST(matrix, 0, log_probs=True, trick=False, debug=True)
+    sampler = Castaway2RST(matrix, 0, log_probs=True, trick=False, debug=False)
     # tree = sampler.castaway_rst()
     # print(f"CastawayRST tree: {parlist_to_newick(tree)}")
-    trees = sampler.sample(n_samples=1000)
+    n_samples=5000
+    trees = sampler.sample(n_samples=n_samples)
     print("Crasher trick:")
-    # for i, tree in enumerate(trees):
-    #     nwk = parlist_to_newick(tree)
-    #     freq = tree_weight(tree, matrix, log_probs=True) - sampler.tot_weight
-    #     print(f"tree {i}: {nwk} ({np.exp(freq)} | true: {true_pmf[nwk][1]} | iw: {freq})")
-    print("Sampled trees:", sorted(trees.items(), key=lambda u: u[1], reverse=True))
+    for nwk, freq in sorted([(k, v / n_samples) for k, v in trees.items()], key=lambda u: u[1], reverse=True):
+        print(f"tree: {nwk} ({freq} | true: {true_pmf[nwk][1]})")
 
     # importance samples with tempering
     for temp in [2, 5, 10, 50, 100]:
