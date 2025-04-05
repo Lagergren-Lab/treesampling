@@ -8,7 +8,7 @@ import scipy.special as sp
 
 from treesampling import algorithms
 import treesampling.utils.graphs as tg
-from treesampling.algorithms import CastawayRST, kirchoff_rst, wilson_rst_from_matrix
+from treesampling.algorithms import CastawayRST, kirchoff_rst
 from treesampling.algorithms.castaway_legacy import _castaway_rst_plain, _castaway_rst_log
 from treesampling.utils.graphs import tree_to_newick, graph_weight, reset_adj_matrix, tuttes_tot_weight, cayleys_formula
 

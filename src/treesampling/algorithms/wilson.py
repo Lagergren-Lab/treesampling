@@ -1,7 +1,10 @@
 import networkx as nx
 import numpy as np
+from tqdm import tqdm
+from treesample.wilson import WilsonSample
+import treesample
 
-from treesampling.utils.graphs import tuttes_tot_weight, tuttes_determinant, tree_weight
+from treesampling.utils.graphs import tuttes_tot_weight, tuttes_determinant, tree_weight, brute_force_tot_weight
 from treesampling.utils.math import StableOp
 
 
@@ -68,11 +71,12 @@ def wilson_rst_from_matrix(X: np.ndarray, log_probs: bool = False) -> list[int]:
             u = prev[u]
     return tree
 
-def test():
+def check():
     n_seeds = 100
     N = 10000
     k = 4
     acc = 0
+    bar = tqdm(total=n_seeds * N)
     for i in range(n_seeds):
         X = np.random.uniform(0, 1, size=(k, k))
         # setup matrix
@@ -81,15 +85,24 @@ def test():
         X[:, 1:] = X[:, 1:] / np.sum(X[:, 1:], axis=0)
         # compute total trees weight
         Z = tuttes_determinant(X)
-        # print(f"total weight: {Z}")
+        # print(f"tutte's Z: {Z}")
+        Z = brute_force_tot_weight(X)
+        # print(f"brute force Z: {Z}")
+        # L = _koo_laplacian(X[1:, 1:], X[0, 1:])
+        L = treesample.util.laplacian(X[1:, 1:], X[0, 1:])
+        Z = np.linalg.det(L)
+        # print(f"koo's Z: {Z}")
 
         # save frequencies and weight of each new tree
         dist = {}
+        sampler = WilsonSample(X)
         for i in range(N):
-            tree = tuple(wilson_rst_from_matrix(X, log_probs=False))
+            tree = tuple(next(sampler.sample()).tolist())
+            # tree = tuple(wilson_rst_from_matrix(X, log_probs=False))
             if tree not in dist:
                 dist[tree] = 0
             dist[tree] += 1 / N
+            bar.update(1)
 
         for tree in dist:
             prob = tree_weight(tree, X) / Z
@@ -98,4 +111,4 @@ def test():
     print(acc / (len(dist) * n_seeds) * 100, "% of trees have been sampled correctly")
 
 if __name__ == '__main__':
-    test()
+    check()

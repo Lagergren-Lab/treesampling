@@ -13,7 +13,8 @@ import scipy.special as sp
 from treesampling.algorithms.castaway import importance_sample
 # from treesampling.algorithms import CastawayRST
 from treesampling.algorithms.castaway_reboot import CastawayRST, Castaway2RST
-from treesampling.utils.graphs import tree_weight, cayleys_formula, tree_to_newick
+from treesampling.algorithms.kulkarni import kulkarni_rst
+from treesampling.utils.graphs import tree_weight, cayleys_formula, tree_to_newick, kirchoff_matrix, tuttes_tot_weight
 
 
 def parlist_to_newick(parlist):
@@ -59,6 +60,7 @@ def get_true_pmf(matrix, cutoff_p=0.99999, cutoff_k=1000):
         it +=1
 
     print(f"Total weight: {tot_weight} (it: {it}, cayley tot #trees: {cayleys_formula(n)})")
+    print(f"Tutte's logdet: {tuttes_tot_weight(matrix, 0, log_probs=True)}")
     # normalize weights
     print(f"First {p * 100}% of trees:")
     acc = 0.
@@ -104,9 +106,22 @@ def main():
     # tree = sampler.castaway_rst()
     # print(f"CastawayRST tree: {parlist_to_newick(tree)}")
     n_samples=5000
-    trees = sampler.sample(n_samples=n_samples)
-    print("Crasher trick:")
-    for nwk, freq in sorted([(k, v / n_samples) for k, v in trees.items()], key=lambda u: u[1], reverse=True):
+    # trees = sampler.sample(n_samples=n_samples)
+    # print("Crasher trick:")
+    # for nwk, freq in sorted([(k, v / n_samples) for k, v in trees.items()], key=lambda u: u[1], reverse=True):
+    #     print(f"tree: {nwk} ({freq} | true: {true_pmf[nwk][1]})")
+
+    # test Kulkarni
+    print("Kulkarni:")
+    kulkarni_dist = {}
+    for i in range(n_samples):
+        tree = tuple(kulkarni_rst(matrix, 0, log_probs=True, debug=True))
+        nwk = parlist_to_newick(tree)
+        if nwk not in kulkarni_dist:
+            kulkarni_dist[nwk] = 0
+        kulkarni_dist[nwk] += 1 / n_samples
+
+    for nwk, freq in sorted([(k, v) for k, v in kulkarni_dist.items()], key=lambda u: u[1], reverse=True):
         print(f"tree: {nwk} ({freq} | true: {true_pmf[nwk][1]})")
 
     # importance samples with tempering

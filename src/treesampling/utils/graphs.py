@@ -1,8 +1,10 @@
 import itertools
+import warnings
 from operator import mul
 from functools import reduce
 import numpy as np
 import networkx as nx
+from scipy.linalg import lu
 
 from treesampling.utils.math import StableOp
 
@@ -288,7 +290,7 @@ def adjoint(mat):
 def tuttes_determinant(X: np.ndarray) -> float:
     """
     Tutte's determinant of a graph (with root in 0)
-    :param X: adjacency matrix
+    :param X: weight matrix
     :return: Tutte's determinant
     """
     A = np.copy(X)
@@ -296,18 +298,26 @@ def tuttes_determinant(X: np.ndarray) -> float:
     return np.linalg.det(L[1:, 1:])
 
 
-def tuttes_tot_weight(graph: nx.DiGraph, root, weight='weight', contracted_arcs=None, deleted_arcs=None):
+def tuttes_tot_weight(graph: nx.DiGraph|np.ndarray, root, weight='weight', contracted_arcs=None, deleted_arcs=None, log_probs: bool = False):
     """
     Ref: https://arxiv.org/pdf/1904.12221.pdf
     :param graph: directed graph with weights
     :param root: root node of every spanning tree
+    :param weight: weight attribute name (if graph is nx.DiGraph)
+    :param contracted_arcs: list of arcs to be contracted
+    :param deleted_arcs: list of arcs to be deleted
+    :param log_probs: if True, weights are exponentiated and determinant is returned in log scale
     :return: the total weight sum of all spanning arborescence
      weights (that is the product of the tree arc weights)
     """
     contracted_arcs = contracted_arcs if contracted_arcs else []
     deleted_arcs = deleted_arcs if deleted_arcs else []
-
-    A = nx.to_numpy_array(graph, weight=weight)
+    if isinstance(graph, np.ndarray):
+        A = graph.copy()
+    elif isinstance(graph, nx.DiGraph):
+        A = nx.to_numpy_array(graph, weight=weight)
+    else:
+        raise ValueError("graph must be either nx.DiGraph or np.ndarray")
     # contract arcs
     for arc in contracted_arcs:
         A[:, arc[1]] = 0
@@ -315,11 +325,27 @@ def tuttes_tot_weight(graph: nx.DiGraph, root, weight='weight', contracted_arcs=
     # delete arcs
     for arc in deleted_arcs:
         A[arc[0], arc[1]] = 0
+    if log_probs:
+        A = np.exp(A)
     L1 = kirchoff_matrix(A)
     # L1 is also known as Kirchoff matrix (as in Colbourn 1996)
     L1r = mat_minor(L1, row=root, col=root)
 
-    return np.linalg.det(L1r)
+    # det
+    det = np.linalg.det(L1r)
+    # check if matrix is almost singular (instable computations)
+    # if (cond_num :=np.linalg.cond(L1r)) > 1 / np.finfo(L1.dtype).eps:
+    #     # test if det is equal to the LU decomposition to check det accuracy
+    #     P, L, U = lu(L1r)
+    #     sign = np.linalg.det(P)
+    #     det_lu = sign * np.prod(np.diag(U))
+    #     if not np.isclose(det, det_lu):
+    #         warnings.warn("LU decomposition failed")
+    #     else:
+    #         warnings.warn(f"LU decomposition {det_lu} is close to the determinant {det}")
+    #     # raise ValueError(f"Matrix is ill-conditioned ({cond_num}), cannot compute determinant")
+    #     warnings.warn(f"Matrix is ill-conditioned ({cond_num}), cannot compute determinant")
+    return det if not log_probs else np.log(det)
 
 
 def kirchoff_matrix(A):
@@ -331,7 +357,6 @@ def kirchoff_matrix(A):
     np.fill_diagonal(A, 0)
     Din = np.diag(np.sum(A, axis=0))
     return Din - A
-
 
 def kirchhoff_tot_weight(graph, minor_row=0, minor_col=0):
     """
@@ -361,3 +386,34 @@ def nxtree_from_list(t: list) -> nx.DiGraph:
     for i, p in enumerate(t[1:]):
         tree.add_edge(p, i + 1)
     return tree
+
+def prufer_to_list(prufer: list|tuple) -> tuple[int]:
+    """
+    Convert a Prufer sequence to a rooted tree.
+    :param prufer: Prufer sequence
+    :return: tuple of parents list
+    """
+    nx_tree = nx.from_prufer_sequence(prufer)
+    rooted_tree = nx.dfs_tree(nx_tree, 0)
+    parent = [-1] * nx_tree.number_of_nodes()
+    for u, v in rooted_tree.edges:
+        parent[v] = u
+
+    return tuple(parent)
+
+
+def brute_force_tot_weight(X: np.ndarray) -> float:
+    """
+    Brute force method to compute total weight of all trees in a graph
+    :param X: adjacency matrix
+    :return: total weight of all trees
+    """
+    n = X.shape[0]
+    tot_weight = 0
+    for prufer_tree in itertools.product(range(n), repeat=n-2):
+        tree = prufer_to_list(prufer_tree)
+        rooted_tree = tree
+        assert rooted_tree[0] == -1
+        weight = tree_weight(rooted_tree, X)
+        tot_weight += weight
+    return tot_weight

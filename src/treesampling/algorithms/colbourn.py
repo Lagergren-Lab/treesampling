@@ -1,7 +1,10 @@
 import numpy as np
 import networkx as nx
+from tqdm import tqdm
+from treesample.colbourn import ColbournSample
 
 import treesampling.utils.graphs as tg
+from treesampling.utils.graphs import kirchoff_matrix, nxtree_from_list
 
 
 def colbourn_rst(graph: nx.DiGraph | np.ndarray, root=0, log_probs: bool = False):
@@ -99,8 +102,8 @@ def _colbourn_tree_from_matrix(W: np.ndarray) -> list[int]:
     A = W[1:, 1:]
     np.fill_diagonal(A, 0)
     # Kirchoff matrix
-    L = _koo_laplacian(A, r)
-    #print("Laplacian condition number: ", np.linalg.cond(L))
+    L = kirchoff_matrix(W)[1:, 1:]
+    # L = _koo_laplacian(A, r)
     B = np.linalg.inv(L).transpose()
     if not np.allclose(L @ B.T, np.eye(n)):
         raise ValueError("Inverse is not correct")
@@ -108,6 +111,7 @@ def _colbourn_tree_from_matrix(W: np.ndarray) -> list[int]:
     tree = [-1] * (n+1)
 
     for j in range(n):
+        # sample parent i of j
         i, p_i = _sample_edge(j=j, B=B, A=A, r=r)
         if i == j:
             # i is root
@@ -116,24 +120,15 @@ def _colbourn_tree_from_matrix(W: np.ndarray) -> list[int]:
             tree[j + 1] = i + 1
         B, L = _update_BL(i, j, B, L, A, r)
 
+    assert nx.is_arborescence(nxtree_from_list(tree)), f"Tree is not arborescence: {tree}"
     return tree
 
-
-def _koo_laplacian(A, r):
-    """
-    Root-weighted Laplacian of Koo et al. (2007)
-    A is the adjacency matrix and r is the root weight
-    """
-    L = -A + np.diag(np.sum(A, 0))
-    L[0] = r
-    return L
-
-
-def test():
+def check():
     n_seeds = 100
-    N = 1000
+    N = 10000
     k = 4
     acc = 0
+    bar = tqdm(total=n_seeds * N)
     for i in range(n_seeds):
         X = np.random.uniform(0, 1, size=(k, k))
         # setup matrix
@@ -142,6 +137,8 @@ def test():
         X[:, 1:] = X[:, 1:] / np.sum(X[:, 1:], axis=0)
         # compute total trees weight
         Z = tg.tuttes_determinant(X)
+        # L = _koo_laplacian(X[1:, 1:], X[0, 1:])
+        # Z = np.linalg.det(L)
         # print(f"total weight: {Z}")
 
         # save frequencies and weight of each new tree
@@ -151,12 +148,13 @@ def test():
             if tree not in dist:
                 dist[tree] = 0
             dist[tree] += 1 / N
+            bar.update(1)
 
         for tree in dist:
             prob = tg.tree_weight(tree, X) / Z
             acc += 1 if np.isclose(dist[tree], prob, rtol=.1) else 0
-            # print(f"tree: {tree}, prob: {prob}, freq: {dist[tree]}")
+            print(f"tree: {tree}, prob: {prob}, freq: {dist[tree]}")
     print(acc / (len(dist) * n_seeds) * 100, "% of trees have been sampled correctly")
 
 if __name__ == '__main__':
-    test()
+    check()

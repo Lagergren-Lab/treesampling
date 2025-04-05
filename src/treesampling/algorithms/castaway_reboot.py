@@ -10,7 +10,7 @@ from tqdm import tqdm
 
 from treesampling import TreeSampler
 from treesampling.utils.graphs import normalize_graph_weights, tree_to_newick, random_uniform_graph, tuttes_determinant, \
-    tree_weight, graph_weight
+    tree_weight, graph_weight, brute_force_tot_weight, tuttes_tot_weight
 from treesampling.utils.math import StableOp
 
 
@@ -700,9 +700,8 @@ def check_log():
         log_X = -np.inf * np.ones_like(X)
         log_X[X > 0] = np.log(X[X > 0])
         # compute total trees weight
-        Z = tuttes_determinant(X)
-        # print(f"total weight: {Z}")
-
+        Z = tuttes_tot_weight(X, 0)
+        # print(f"tutte's Z: {Z}")
         # save frequencies and weight of each new tree
         sampler = Castaway2RST(log_X, root=0, trick=False, log_probs=True, debug=False)
         assert not sampler.wx.init_crashers
