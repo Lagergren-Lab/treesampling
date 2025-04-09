@@ -2,6 +2,7 @@ import numpy as np
 import scipy.special as sp
 import numpy.linalg as la
 
+
 class StableOp:
 
     def __init__(self, log_probs=False):
@@ -102,3 +103,7 @@ def generate_random_matrix(n, condition_number=10):
     P = U.dot(S).dot(V.T)
     P = P.dot(P.T)
     return P
+
+# Cheeger constant
+
+# Jens conductance

@@ -1,10 +1,8 @@
 import networkx as nx
 import numpy as np
 from tqdm import tqdm
-from treesample.wilson import WilsonSample
-import treesample
 
-from treesampling.utils.graphs import tuttes_tot_weight, tuttes_determinant, tree_weight, brute_force_tot_weight
+from treesampling.utils.graphs import tuttes_determinant, tree_weight, brute_force_tot_weight
 from treesampling.utils.math import StableOp
 
 
@@ -35,9 +33,8 @@ def wilson_rst(graph: nx.DiGraph, root: int, log_probs: bool = False) -> nx.DiGr
 
 def wilson_rst_from_matrix(X: np.ndarray, log_probs: bool = False) -> list[int]:
     """
-    Takes a weight matrix and return the tree as array of shape (n_nodes-1,)
+    Takes a weight matrix and return the tree as array of shape (n_nodes-1,) assumes the first node is the root.
     :param weights: np.ndarray of shape (n_nodes, n_nodes)
-    :param root: int, root node
     :param log_probs: bool, if True, weights are in log scale
     :return: np.ndarray of shape (n_nodes-1,)
     """
@@ -88,17 +85,11 @@ def check():
         # print(f"tutte's Z: {Z}")
         Z = brute_force_tot_weight(X)
         # print(f"brute force Z: {Z}")
-        # L = _koo_laplacian(X[1:, 1:], X[0, 1:])
-        L = treesample.util.laplacian(X[1:, 1:], X[0, 1:])
-        Z = np.linalg.det(L)
-        # print(f"koo's Z: {Z}")
 
         # save frequencies and weight of each new tree
         dist = {}
-        sampler = WilsonSample(X)
         for i in range(N):
-            tree = tuple(next(sampler.sample()).tolist())
-            # tree = tuple(wilson_rst_from_matrix(X, log_probs=False))
+            tree = tuple(wilson_rst_from_matrix(X, log_probs=False))
             if tree not in dist:
                 dist[tree] = 0
             dist[tree] += 1 / N

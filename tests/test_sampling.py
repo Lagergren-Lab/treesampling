@@ -10,6 +10,7 @@ from treesampling import algorithms
 import treesampling.utils.graphs as tg
 from treesampling.algorithms import CastawayRST, kirchoff_rst
 from treesampling.algorithms.castaway_legacy import _castaway_rst_plain, _castaway_rst_log
+from treesampling.algorithms.wilson import wilson_rst_from_matrix
 from treesampling.utils.graphs import tree_to_newick, graph_weight, reset_adj_matrix, tuttes_tot_weight, cayleys_formula
 
 
@@ -155,7 +156,7 @@ def test_castaway_low_weight():
     low_weight = 1e-19
     random_graph = tg.random_weakly_connected_graph(n_nodes, weak_weight=low_weight)
     # Kirchhoff Laplacian determinant test
-    L = tg.kirchoff_matrix(nx.to_numpy_array(random_graph))
+    L = tg.laplacian(nx.to_numpy_array(random_graph))
     print(np.linalg.det(tg.mat_minor(L, 0, 0)))
     # Koo Laplacian determinant test
     kL = algorithms._koo_laplacian(nx.to_numpy_array(random_graph), 0)
@@ -345,14 +346,6 @@ def test_wilson_rst():
         print(adj_mat / adj_mat.sum(axis=1, keepdims=True))
 
 def test_wilson_4_nodes():
-    def laplacian(A, r):
-        """
-        Root-weighted Laplacian of Koo et al. (2007)
-        A is the adjacency matrix and r is the root weight
-        """
-        L = -A + np.diag(np.sum(A, 0))
-        L[0] = r
-        return L
 
     def tree_weight(tree, matrix):
         return np.prod([matrix[u, v] for u, v in tree.edges()])
@@ -365,7 +358,7 @@ def test_wilson_4_nodes():
 
     # prepare normalization factor
     A = np.copy(W)
-    L = laplacian(A[1:, 1:], A[0, 1:])
+    L = tg.laplacian(A)
     new_det = np.linalg.det(L)
     print(f"new det: {new_det}")
     graph = nx.from_numpy_array(W, create_using=nx.DiGraph)
@@ -394,15 +387,6 @@ def test_wilson_4_nodes():
 
 
 def test_castaway_4_nodes():
-    def laplacian(A, r):
-        """
-        Root-weighted Laplacian of Koo et al. (2007)
-        A is the adjacency matrix and r is the root weight
-        """
-        L = -A + np.diag(np.sum(A, 0))
-        L[0] = r
-        return L
-
     def tree_weight(tree, matrix):
         return np.prod([matrix[u, v] for u, v in tree.edges()])
 
@@ -414,7 +398,7 @@ def test_castaway_4_nodes():
 
     # prepare normalization factor
     A = np.copy(W)
-    L = laplacian(A[1:, 1:], A[0, 1:])
+    L = tg.laplacian(A)
     new_det = np.linalg.det(L)
     print(f"new det: {new_det}")
     graph = nx.from_numpy_array(W, create_using=nx.DiGraph)
@@ -442,15 +426,6 @@ def test_castaway_4_nodes():
     print(approx, total)
 
 def test_castaway_log_4_nodes():
-    def laplacian(A, r):
-        """
-        Root-weighted Laplacian of Koo et al. (2007)
-        A is the adjacency matrix and r is the root weight
-        """
-        L = -A + np.diag(np.sum(A, 0))
-        L[0] = r
-        return L
-
     def tree_weight(tree, matrix):
         return np.sum([matrix[u, v] for u, v in tree.edges()])
 
@@ -461,7 +436,7 @@ def test_castaway_log_4_nodes():
     np.fill_diagonal(W, 0)
     # prepare normalization factor
     A = np.copy(W)
-    L = laplacian(A[1:, 1:], A[0, 1:])
+    L = tg.laplacian(A)
     new_det = np.linalg.det(L)
     print(f"new det: {new_det}")
     graph = nx.from_numpy_array(W, create_using=nx.DiGraph)

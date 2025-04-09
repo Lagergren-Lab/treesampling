@@ -18,7 +18,7 @@ def kulkarni_rst(X: np.ndarray, root=0, log_probs: bool = False, debug: bool = F
     # set root column to ones (it only matters it's not zero)
     op = StableOp(log_probs=log_probs)
     matrix = np.copy(X)
-    matrix[:, root] = op.one()
+    # matrix[:, root] = op.one()
     # normalize graph weights
     non_root_col = [i for i in range(matrix.shape[1]) if i != root]
     matrix[:, non_root_col] = op.normalize(matrix[:, non_root_col], axis=0)
@@ -48,8 +48,8 @@ def kulkarni_rst(X: np.ndarray, root=0, log_probs: bool = False, debug: bool = F
         # sum of weights of trees including tree edges + e (a' in Kulkarni A8)
         # Leverage score of arc
         aa = 1 if tree.count(-1) == n else tg.tree_weight(tree, matrix)
-        aa *= matrix[arc] * tg.tuttes_tot_weight(matrix, root,
-                                                 contracted_arcs=tree_arcs + [arc], deleted_arcs=deleted_arcs)
+        aa *= matrix[arc] * tg.tuttes_tot_weight(matrix, root, contracted_arcs=tree_arcs + [arc],
+                                                 deleted_arcs=deleted_arcs)
         acceptance_ratio = aa / a
         logger.debug(f"a: {a}, aa: {aa}")
         logger.debug(f"acceptance ratio: {acceptance_ratio}")
@@ -88,7 +88,7 @@ def check_log():
         log_X[X > 0] = np.log(X[X > 0])
         # compute total trees weight
         Z = tg.tuttes_tot_weight(X, 0)
-        L1 = tg.kirchoff_matrix(X)
+        L1 = tg.laplacian(X)
         # L1 is also known as Kirchoff matrix (as in Colbourn 1996)
         L1r = tg.mat_minor(L1, row=0, col=0)
         cond_number = np.linalg.cond(L1r)
@@ -148,5 +148,5 @@ def check():
     print(acc / (len(dist) * n_seeds) * 100, "% of trees have been sampled correctly")
 
 if __name__ == "__main__":
-    check()
-    # check_log()
+    # check()
+    check_log()

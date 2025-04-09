@@ -31,6 +31,12 @@ def tree_to_newick(g: nx.DiGraph, root=None, weight=None):
         subgs.append(node_str)
     return "(" + ','.join(subgs) + ")" + str(root)
 
+def parlist_to_newick(parlist):
+    tree = nx.DiGraph()
+    for i, p in enumerate(parlist):
+        if p != -1:
+            tree.add_edge(p, i)
+    return tree_to_newick(tree)
 
 # taken from VICTree
 def enumerate_rooted_trees(n_nodes, root=0, weighted_graph: nx.DiGraph | None = None) -> [nx.DiGraph]:
@@ -73,6 +79,7 @@ def block_matrix(n_nodes: int, n_blocks: int = 2, log_probs: bool = False, low_w
     components = [i // nodes_per_component for i in range(nodes_per_component * n_blocks)]
     # fill remaining nodes with last component
     components = components + [n_blocks - 1] * (n_nodes - len(components))
+    low_mask = np.ones((n_nodes, n_nodes), dtype=bool)
     # assign lower weight to arcs between components
     for i in range(n_nodes):
         for j in range(n_nodes):
@@ -81,6 +88,7 @@ def block_matrix(n_nodes: int, n_blocks: int = 2, log_probs: bool = False, low_w
             # set 1 for arcs within components
             elif components[i] == components[j]:
                 weights[i, j] = op.one()
+                low_mask[i, j] = False
     return weights
 
 def random_uniform_graph(n_nodes, log_probs=False, normalize=None) -> nx.DiGraph:
@@ -294,11 +302,11 @@ def tuttes_determinant(X: np.ndarray) -> float:
     :return: Tutte's determinant
     """
     A = np.copy(X)
-    L = kirchoff_matrix(A)
+    L = laplacian(A)
     return np.linalg.det(L[1:, 1:])
 
 
-def tuttes_tot_weight(graph: nx.DiGraph|np.ndarray, root, weight='weight', contracted_arcs=None, deleted_arcs=None, log_probs: bool = False):
+def tuttes_tot_weight(graph: nx.DiGraph|np.ndarray, root, weight='weight', contracted_arcs=None, deleted_arcs=None):
     """
     Ref: https://arxiv.org/pdf/1904.12221.pdf
     :param graph: directed graph with weights
@@ -306,7 +314,6 @@ def tuttes_tot_weight(graph: nx.DiGraph|np.ndarray, root, weight='weight', contr
     :param weight: weight attribute name (if graph is nx.DiGraph)
     :param contracted_arcs: list of arcs to be contracted
     :param deleted_arcs: list of arcs to be deleted
-    :param log_probs: if True, weights are exponentiated and determinant is returned in log scale
     :return: the total weight sum of all spanning arborescence
      weights (that is the product of the tree arc weights)
     """
@@ -325,9 +332,7 @@ def tuttes_tot_weight(graph: nx.DiGraph|np.ndarray, root, weight='weight', contr
     # delete arcs
     for arc in deleted_arcs:
         A[arc[0], arc[1]] = 0
-    if log_probs:
-        A = np.exp(A)
-    L1 = kirchoff_matrix(A)
+    L1 = laplacian(A)
     # L1 is also known as Kirchoff matrix (as in Colbourn 1996)
     L1r = mat_minor(L1, row=root, col=root)
 
@@ -336,19 +341,19 @@ def tuttes_tot_weight(graph: nx.DiGraph|np.ndarray, root, weight='weight', contr
     # check if matrix is almost singular (instable computations)
     # if (cond_num :=np.linalg.cond(L1r)) > 1 / np.finfo(L1.dtype).eps:
     #     # test if det is equal to the LU decomposition to check det accuracy
-    #     P, L, U = lu(L1r)
-    #     sign = np.linalg.det(P)
-    #     det_lu = sign * np.prod(np.diag(U))
+    P, L, U = lu(L1r)
+    sign = np.linalg.det(P)
+    det_lu = sign * np.prod(np.diag(U))
     #     if not np.isclose(det, det_lu):
     #         warnings.warn("LU decomposition failed")
     #     else:
     #         warnings.warn(f"LU decomposition {det_lu} is close to the determinant {det}")
     #     # raise ValueError(f"Matrix is ill-conditioned ({cond_num}), cannot compute determinant")
     #     warnings.warn(f"Matrix is ill-conditioned ({cond_num}), cannot compute determinant")
-    return det if not log_probs else np.log(det)
+    return det_lu
 
 
-def kirchoff_matrix(A):
+def laplacian(A):
     """
     Kirchoff matrix of a graph (Laplacian)
     :param A: adjacency matrix
@@ -417,3 +422,51 @@ def brute_force_tot_weight(X: np.ndarray) -> float:
         weight = tree_weight(rooted_tree, X)
         tot_weight += weight
     return tot_weight
+
+def crasher_matrix(n: int, num_components: int = 2, log_eps: float = -10) -> np.ndarray:
+    """
+    Generate a matrix with one crasher node for each component and a set of non-component nodes.
+    The size of the components is (n - 1) // (num_components + 1) as the same number of nodes belong to the non-component subgraph.
+    Assumes root is 0 and does not belong to any component nor the remaining nodes.
+    - low connections from root
+    - low connections between components
+    - high connections within components
+    - high connection from crasher to any other node in the component
+    :param n: int, number of nodes
+    :param num_components: int, number of blocks
+    :param log_eps: float, weight for inter-block connections (in log scale)
+    :return: np.ndarray, block matrix
+    """
+    root = 0
+
+    op = StableOp(log_probs=True)
+    # add variability to the weights
+    weights = np.zeros((n, n)) + log_eps + np.random.rand(n, n) * abs(log_eps) / 10
+
+    # divide nodes into num_components + 1 subgraphs
+    k = num_components + 1
+    nodes_per_component = (n - 1) // k
+    components = [-1] + [i // nodes_per_component for i in range(n-1)]  # root is not in components
+    # select the crasher for each component to be the first node in the component
+    crashers = [i * nodes_per_component + 1 for i in range(num_components)]
+    # fill remaining nodes with last component (excluding root)
+    components = components + [k - 1] * (n - 1 - len(components))
+    # assign lower weight to arcs between components
+    for i in range(n):
+        for j in range(n):
+            if i == j or j == root:
+                weights[i, j] = op.zero()
+            # set 1 for arcs within components and arcs from crashers to any other node in the component or outside components
+            elif components[i] == components[j] or (i in crashers and (components[i] == components[j] or components[j] == k - 1)):
+                weights[i, j] = op.one()
+    return weights
+
+
+def prufer_to_rooted_parent(prufer):
+    nx_tree = nx.from_prufer_sequence(prufer)
+    rooted_tree = nx.dfs_tree(nx_tree, 0)
+    parent = [-1] * nx_tree.number_of_nodes()
+    for u, v in rooted_tree.edges:
+        parent[v] = u
+
+    return tuple(parent), tree_to_newick(rooted_tree)

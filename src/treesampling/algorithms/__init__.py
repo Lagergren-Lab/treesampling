@@ -85,8 +85,7 @@ def kirchoff_rst(graph: nx.DiGraph, root=0, log_probs: bool = False) -> nx.DiGra
             deleted_arcs.append(arc)
             # recompute aa
             aa = 1. if not tree.edges() else graph_weight(tree)
-            aa *= tuttes_tot_weight(graph, root, contracted_arcs=[e for e in tree.edges()],
-                                    deleted_arcs=deleted_arcs)
+            aa *= tuttes_tot_weight(graph, root, contracted_arcs=[e for e in tree.edges()], deleted_arcs=deleted_arcs)
 
     return tree
 

@@ -72,7 +72,7 @@ class WxTable:
         # for i in range(1, len(x_list)):
         i = 1
         while i < len(x_list):
-            x = x_list[:i]
+            x = [xx for xx in x_list[:i] if xx not in self.crashers]
             u = x_list[i]
             # Y = X U { u }
             wy = {}
@@ -136,7 +136,7 @@ class WxTable:
         :param trick: boolean, if True, the algorithm runs in O(n^3) by efficiently updating the W table. Otherwise W
             is computed from scratch every time a new arc is added to the tree
         """
-        self.logger.debug(f"\t- Updating X = X - ({u})")
+        self.logger.debug(f"\t- Updating X = X - ({u}) | crashers = {self.crashers}")
         assert u in self.x + self.crashers, f"Node {u} not in x nor crashers set prior to removal and update"
         if u in self.crashers:
             self.logger.debug(f"\t- Remove crasher node {u} from crashers set...")
@@ -589,7 +589,7 @@ class Castaway2RST(CastawayRST):
             self.logger.debug(f"- Updating Wx table and removing node k:{k} from x set: {self.wx.x}...")
             self.wx.update(k, trick=self.trick)
             tree_nodes = [j for j, i in enumerate(tree) if i != -1] + [self.root]
-            if k == i and len(self.wx.x) > 0:
+            if k == i and (len(self.wx.x) > 0 or len(self.wx.crashers) > 0):
                 # pick new i and reset O
                 i = np.random.choice(self.wx.x + self.wx.crashers)
                 self.logger.debug(f"- [end] End of walk (k = i). Picking new node i:{i} from candidates set"

@@ -4,7 +4,7 @@ from tqdm import tqdm
 from treesample.colbourn import ColbournSample
 
 import treesampling.utils.graphs as tg
-from treesampling.utils.graphs import kirchoff_matrix, nxtree_from_list
+from treesampling.utils.graphs import laplacian, nxtree_from_list
 
 
 def colbourn_rst(graph: nx.DiGraph | np.ndarray, root=0, log_probs: bool = False):
@@ -102,7 +102,7 @@ def _colbourn_tree_from_matrix(W: np.ndarray) -> list[int]:
     A = W[1:, 1:]
     np.fill_diagonal(A, 0)
     # Kirchoff matrix
-    L = kirchoff_matrix(W)[1:, 1:]
+    L = laplacian(W)[1:, 1:]
     # L = _koo_laplacian(A, r)
     B = np.linalg.inv(L).transpose()
     if not np.allclose(L @ B.T, np.eye(n)):

@@ -2,130 +2,74 @@
 Take an interesting matrix from VICTree execution, compute the total weight via brute force and use it for
 assessing sampling correctness for the CastawayRST algorithm.
 """
-import heapq
-import itertools
 import logging
+import time
 
-import networkx as nx
 import numpy as np
 import scipy.special as sp
 
 from treesampling.algorithms.castaway import importance_sample
 # from treesampling.algorithms import CastawayRST
-from treesampling.algorithms.castaway_reboot import CastawayRST, Castaway2RST
+from treesampling.algorithms.castaway_reboot import Castaway2RST
 from treesampling.algorithms.kulkarni import kulkarni_rst
-from treesampling.utils.graphs import tree_weight, cayleys_formula, tree_to_newick, kirchoff_matrix, tuttes_tot_weight
+from treesampling.algorithms.wilson import wilson_rst_from_matrix
+from treesampling.utils.evaluation import analyse_true_dist, get_victree_demo_matrix, cheeger_constant, get_sampler_pmf
+from treesampling.utils.graphs import parlist_to_newick, crasher_matrix, block_matrix
 
 
-def parlist_to_newick(parlist):
-    tree = nx.DiGraph()
-    for i, p in enumerate(parlist):
-        if p != -1:
-            tree.add_edge(p, i)
-    return tree_to_newick(tree)
-
-def prufer_to_rooted_parent(prufer):
-    nx_tree = nx.from_prufer_sequence(prufer)
-    rooted_tree = nx.dfs_tree(nx_tree, 0)
-    parent = [-1] * nx_tree.number_of_nodes()
-    for u, v in rooted_tree.edges:
-        parent[v] = u
-
-    return tuple(parent), tree_to_newick(rooted_tree)
-
-def get_true_pmf(matrix, cutoff_p=0.99999, cutoff_k=1000):
-    # keep first K trees in a dictionary
-    K = cutoff_k
-    p = cutoff_p
-    n = matrix.shape[0]
-    # priority queue for K trees
-    top_k_trees = []
-    # compute total weight of trees
-    tot_weight = -np.inf
-    # print total weight increase in
-    it = 0
-    for prufer_tree in itertools.product(range(n), repeat=n-2):
-        tree, newick = prufer_to_rooted_parent(prufer_tree)
-        rooted_tree = tree
-        assert rooted_tree[0] == -1
-        weight = tree_weight(rooted_tree, matrix, log_probs=True)
-        tot_weight = np.logaddexp(tot_weight, weight)
-
-        if len(top_k_trees) < K:
-            # largest weight first
-            heapq.heappush(top_k_trees, (weight, rooted_tree, newick))
-        else:
-            if weight > top_k_trees[0][0]:
-                heapq.heapreplace(top_k_trees, (weight, rooted_tree, newick))
-        it +=1
-
-    print(f"Total weight: {tot_weight} (it: {it}, cayley tot #trees: {cayleys_formula(n)})")
-    print(f"Tutte's logdet: {tuttes_tot_weight(matrix, 0, log_probs=True)}")
-    # normalize weights
-    print(f"First {p * 100}% of trees:")
-    acc = 0.
-    top_trees = {}  # either limited by K or by the p-th percentile
-    for i, (w, t, nwk) in enumerate(heapq.nlargest(K, top_k_trees)):
-        norm_tree_weight = np.exp(w - tot_weight)
-        top_trees[nwk] = (w, norm_tree_weight, t)
-        acc += norm_tree_weight
-        if acc < p:
-            print(f"Tree {i}: {w} {norm_tree_weight} {t} - newick: {nwk}")
-        else:
-            break
-    print(f"Total norm weight (should be close to 1): {acc}")
-    return top_trees
-
-
-def main():
-    matrix = np.array([
-        [-np.inf, -174.769, -174.769, -244.775, -249.29 , -276.033, -240.241],
-        [-np.inf, -np.inf, -56.238, -124.203, -143.693, -174.44 , -145.639],
-        [-np.inf, -59.999, -np.inf, -18.449, -56.7  , -107.202, -51.118],
-        [-np.inf, -133.159, 0.   , -np.inf, -126.356, -155.468, -123.161],
-        [-np.inf, -141.243, -39.487, -117.625, -np.inf, -105.354, -60.438],
-        [-np.inf, -177.913, -78.955, -150.078, -84.43 , -np.inf, -102.489],
-        [-np.inf, -131.7  , -25.589, -115.073, -59.796, -109.966, -np.inf]
-    ])
-    true_pmf = get_true_pmf(matrix, cutoff_p=0.99999, cutoff_k=1000)
-    graph = nx.DiGraph()
-    for i, j in itertools.product(range(matrix.shape[0]), repeat=2):
-        if i != j and j != 0:
-            graph.add_edge(i, j, weight=matrix[i, j])
-    mst_nwk = tree_to_newick(nx.maximum_spanning_arborescence(graph))
-    print(f"MST: {mst_nwk}")
-    edge_occurrence = np.zeros_like(matrix)
-    for _, norm_weight, tree in true_pmf.values():
-        for i in range(1, len(tree)):
-            edge_occurrence[tree[i], i] += norm_weight
-    print(np.array_str(edge_occurrence, max_line_width=100, precision=3, suppress_small=True))
-
-    # sample trees with CastawayRST
-    # sampler = CastawayRST(matrix, 0, log_probs=True, trick=False, debug=True)
-    sampler = Castaway2RST(matrix, 0, log_probs=True, trick=False, debug=False)
-    # tree = sampler.castaway_rst()
-    # print(f"CastawayRST tree: {parlist_to_newick(tree)}")
-    n_samples=5000
-    # trees = sampler.sample(n_samples=n_samples)
-    # print("Crasher trick:")
-    # for nwk, freq in sorted([(k, v / n_samples) for k, v in trees.items()], key=lambda u: u[1], reverse=True):
-    #     print(f"tree: {nwk} ({freq} | true: {true_pmf[nwk][1]})")
-
+def run_analysis(matrix, sample_size=5000, temp=False):
+    norm_matrix = matrix - sp.logsumexp(matrix, axis=0)
+    norm_matrix[:, 0] = -np.inf
+    logging.info(f"Conductance: {cheeger_constant(norm_matrix, root=0, log_probs=True)[0]}")
+    logging.info(f"Normalized matrix:\n{np.array_str(norm_matrix, max_line_width=100, precision=3, suppress_small=True)}")
+    true_pmf, mst, edge_freq = analyse_true_dist(matrix)
+    n_samples = castaway_dist(matrix, true_pmf, sample_size=sample_size)
+    # test Wilson
+    # wilson_dist(norm_matrix, true_pmf, sample_size=n_samples)
     # test Kulkarni
-    print("Kulkarni:")
-    kulkarni_dist = {}
-    for i in range(n_samples):
-        tree = tuple(kulkarni_rst(matrix, 0, log_probs=True, debug=True))
-        nwk = parlist_to_newick(tree)
-        if nwk not in kulkarni_dist:
-            kulkarni_dist[nwk] = 0
-        kulkarni_dist[nwk] += 1 / n_samples
-
-    for nwk, freq in sorted([(k, v) for k, v in kulkarni_dist.items()], key=lambda u: u[1], reverse=True):
-        print(f"tree: {nwk} ({freq} | true: {true_pmf[nwk][1]})")
-
+    try:
+        kulkarni_dist(matrix, n_samples, true_pmf)
+    except IndexError as ie:
+        logging.info(f"Error in kulkarni sampling, skipping")
     # importance samples with tempering
-    for temp in [2, 5, 10, 50, 100]:
+    if temp:
+        tempering_analysis(matrix, true_pmf)
+
+def wilson_dist(matrix, true_pmf, sample_size=5000, time_limit=300):
+    print("Wilson:")
+    trees = {}
+    avg_time = 0.
+    start_alg = time.time()
+    for i in range(sample_size):
+        start = time.time()
+        tree = tuple(wilson_rst_from_matrix(matrix, log_probs=True))
+        end = time.time()
+        avg_time = ((avg_time * i) + (end - start)) / (i + 1)
+        # running estimation
+        eta = avg_time * sample_size
+        if time.time() - start_alg > 10 and eta > time_limit:
+            print(f"ETA ({eta}s) exceeds time limit ({time_limit}s)")
+            break
+        elif i % 100 == 0:
+            print(f"Sample {i} ({end - start:.3f}s/sample, ETA: {eta:.3f}s)")
+
+        nwk = parlist_to_newick(tree)
+        if nwk not in trees:
+            trees[nwk] = 0
+        trees[nwk] += 1
+
+    for nwk, freq in sorted([(k, v / 5000) for k, v in trees.items()], key=lambda u: u[1], reverse=True):
+        if nwk in true_pmf:
+            print(f"tree: {nwk} ({freq} | true: {true_pmf[nwk][1]})")
+        else:
+            print(f"tree: {nwk} ({freq} | true: 0.0)")
+    return None
+
+
+def tempering_analysis(matrix, true_pmf, temp_vals: list = None):
+    if temp_vals is None:
+        temp_vals = [2, 5, 10, 50, 100]
+    for temp in temp_vals:
         print(f"temp: {temp}")
         try:
             trees = importance_sample(matrix, 100, temp=temp, log_probs=True)
@@ -148,7 +92,55 @@ def main():
                 break
 
 
+def kulkarni_dist(matrix, n_samples, true_pmf):
+    print("Kulkarni:")
+    kulkarni_pmf = {}
+    for i in range(n_samples):
+        tree = tuple(kulkarni_rst(matrix, 0, log_probs=True, debug=False))
+        nwk = parlist_to_newick(tree)
+        if nwk not in kulkarni_pmf:
+            kulkarni_pmf[nwk] = 0
+        kulkarni_pmf[nwk] += 1 / n_samples
+    for nwk, freq in sorted([(k, v) for k, v in kulkarni_pmf.items()], key=lambda u: u[1], reverse=True):
+        if nwk in true_pmf:
+            print(f"tree: {nwk} ({freq} | true: {true_pmf[nwk][1]})")
+        else:
+            print(f"tree: {nwk} ({freq} | true: 0.0)")
+
+
+def castaway_dist(matrix, true_pmf, sample_size=5000):
+    # sample trees with CastawayRST
+    # sampler = CastawayRST(matrix, 0, log_probs=True, trick=False, debug=True)
+    sampler = Castaway2RST(matrix, 0, log_probs=True, trick=False, debug=False)
+    # tree = sampler.castaway_rst()
+    # print(f"CastawayRST tree: {parlist_to_newick(tree)}")
+    castaway_pmf = get_sampler_pmf(matrix, lambda x: sampler.sample_tree_as_list(), n=sample_size)
+    edge_freq = np.zeros_like(matrix)
+    for _, f, t in castaway_pmf.values():
+        for i in range(1, len(t)):
+            edge_freq[t[i], i] += f
+
+    print("Crasher trick:")
+    print("Edge frequencies:")
+    print(edge_freq)
+    print("Edge frequencies sum (must be 1 everywhere except idx=0):")
+    print(np.sum(edge_freq, axis=0))
+    for nwk, (w, freq, t) in sorted([(k, v) for k, v in castaway_pmf.items()], key=lambda x: x[1][1], reverse=True):
+        if nwk in true_pmf:
+            print(f"tree: {nwk} ({freq} | true: {true_pmf[nwk][1]})")
+        else:
+            print(f"tree: {nwk} ({freq} | true: 0.0)")
+    return sample_size
+
+
+def main():
+    # Example matrix from VICTree
+    # matrix = get_victree_demo_matrix()
+    matrix = crasher_matrix(7, 2, -30)
+    # matrix = block_matrix(7, 2, log_probs=True, low_weight=-30, root=0)
+    run_analysis(matrix, 10000)
+
 if __name__ == "__main__":
     np.random.seed(42)
-    logging.basicConfig(level=logging.INFO)
+    logging.basicConfig(level=logging.DEBUG)
     main()
