@@ -1,7 +1,6 @@
 import numpy as np
 import networkx as nx
 from tqdm import tqdm
-from treesample.colbourn import ColbournSample
 
 import treesampling.utils.graphs as tg
 from treesampling.utils.graphs import laplacian, nxtree_from_list
