@@ -60,26 +60,30 @@ def enumerate_rooted_trees(n_nodes, root=0, weighted_graph: nx.DiGraph | None = 
     return trees
 
 def block_matrix(n_nodes: int, n_blocks: int = 2, log_probs: bool = False, low_weight: float = 1e-3,
-                 root: int = None) -> np.ndarray:
+                 root: int = None, noise_ratio: float = 0.) -> np.ndarray:
     """
     Generate a symmetric block matrix with weight of 1 for intra-block connections and low_weight for inter-block connections.
     :param n_nodes: int, number of nodes
     :param n_blocks: int, number of blocks
     :param log_probs: bool, if True, weights are log probabilities
     :param low_weight: float, weight for inter-block connections
-    :param root: int, root index if any
+    :param root: int, root index if any. root is detached from the blocks
     :return: np.ndarray, block matrix
     """
 
     op = StableOp(log_probs)
-    weights = np.zeros((n_nodes, n_nodes)) + low_weight
+    if log_probs:
+        noise =  np.random.rand(n_nodes, n_nodes) * abs(low_weight) * noise_ratio
+    else:
+        noise = np.random.rand(n_nodes, n_nodes) * low_weight * noise_ratio
+    weights = np.zeros((n_nodes, n_nodes)) + low_weight + noise
 
-    # divide nodes into k components
-    nodes_per_component = n_nodes // n_blocks
-    components = [i // nodes_per_component for i in range(nodes_per_component * n_blocks)]
+    # divide nodes (exclude root) into k components
+    component_nodes = n_nodes - (1 if root is not None else 0)
+    nodes_per_component = component_nodes // n_blocks
+    components = [-1] + [i // nodes_per_component for i in range(nodes_per_component * n_blocks)]
     # fill remaining nodes with last component
-    components = components + [n_blocks - 1] * (n_nodes - len(components))
-    low_mask = np.ones((n_nodes, n_nodes), dtype=bool)
+    components = components + [n_blocks - 1] * (component_nodes - len(components))
     # assign lower weight to arcs between components
     for i in range(n_nodes):
         for j in range(n_nodes):
@@ -88,7 +92,6 @@ def block_matrix(n_nodes: int, n_blocks: int = 2, log_probs: bool = False, low_w
             # set 1 for arcs within components
             elif components[i] == components[j]:
                 weights[i, j] = op.one()
-                low_mask[i, j] = False
     return weights
 
 def random_uniform_graph(n_nodes, log_probs=False, normalize=None) -> nx.DiGraph:
@@ -461,6 +464,44 @@ def crasher_matrix(n: int, num_components: int = 2, log_eps: float = -10) -> np.
                 weights[i, j] = op.one()
     return weights
 
+def crasher2_matrix(n: int, num_components: int = 2, log_eps: float = -10) -> np.ndarray:
+    """
+    Generate a matrix with two crasher nodes for each component and a set of non-component nodes.
+    The size of the components is (n - 1) // (num_components + 1) as the same number of nodes belong to the non-component subgraph.
+    Assumes root is 0 and does not belong to any component nor the remaining nodes.
+    - low connections from root
+    - low connections between components
+    - high connections within components
+    - high connection from crasher to any other node in the component
+    :param n: int, number of nodes
+    :param num_components: int, number of blocks (n // (num_components + 1) > 2 in order
+        for 2 crashers to be selected)
+    :param log_eps: float, weight for inter-block connections (in log scale)
+    :return: np.ndarray, block matrix
+    """
+    root = 0
+
+    op = StableOp(log_probs=True)
+    # add variability to the weights
+    weights = np.zeros((n, n)) + log_eps + np.random.rand(n, n) * abs(log_eps) / 10
+
+    # divide nodes into num_components + 1 subgraphs
+    k = num_components + 1
+    nodes_per_component = (n - 1) // k
+    components = [-1] + [i // nodes_per_component for i in range(n-1)]  # root is not in components
+    # select the crasher for each component to be the first node in the component
+    crashers = [i * nodes_per_component + 1 for i in range(num_components)] + [i * nodes_per_component + 2 for i in range(num_components)]
+    # fill remaining nodes with last component (excluding root)
+    components = components + [k - 1] * (n - 1 - len(components))
+    # assign lower weight to arcs between components
+    for i in range(n):
+        for j in range(n):
+            if i == j or j == root:
+                weights[i, j] = op.zero()
+            # set 1 for arcs within components and arcs from crashers to any other node in the component or outside components
+            elif (components[i] != k-1 and components[i] == components[j]) or (i in crashers and (components[i] == components[j] or components[j] == k - 1)):
+                weights[i, j] = op.one()
+    return weights
 
 def prufer_to_rooted_parent(prufer):
     nx_tree = nx.from_prufer_sequence(prufer)

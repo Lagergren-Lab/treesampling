@@ -18,7 +18,7 @@ from treesampling.algorithms.castaway_reboot import Castaway2RST
 from treesampling.algorithms.kulkarni import kulkarni_rst
 from treesampling.algorithms.wilson import wilson_rst_from_matrix
 from treesampling.utils.evaluation import analyse_true_dist, get_sampler_pmf, jens_conductance, cheeger_constant
-from treesampling.utils.graphs import crasher_matrix, laplacian, mat_minor
+from treesampling.utils.graphs import crasher_matrix, laplacian, mat_minor, block_matrix
 
 
 def compute_edge_statistics(pmf, tot_weight, reweighted: bool = False, log_p: bool = False) -> tuple[np.ndarray, np.ndarray]:
@@ -124,7 +124,8 @@ def main():
             logging.debug(f"seed: {seed}")
             np.random.seed(seed)
             # generate crasher matrix
-            matrix = crasher_matrix(n_nodes, log_eps=low_weight, num_components=num_components)
+            # matrix = crasher_matrix(n_nodes, log_eps=low_weight, num_components=num_components)
+            matrix = block_matrix(n_nodes, n_blocks=num_components, low_weight=low_weight, log_probs=True, noise_ratio=0.1, root=0)
             matrix[:, 1:] = matrix[:, 1:] - sp.logsumexp(matrix[:, 1:], axis=0)
             logging.debug(f"Norm matrix:\n{np.array_str(matrix, max_line_width=100, precision=3, suppress_small=True)}")
 

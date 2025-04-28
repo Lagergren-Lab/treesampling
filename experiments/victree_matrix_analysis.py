@@ -14,13 +14,15 @@ from treesampling.algorithms.castaway_reboot import Castaway2RST
 from treesampling.algorithms.kulkarni import kulkarni_rst
 from treesampling.algorithms.wilson import wilson_rst_from_matrix
 from treesampling.utils.evaluation import analyse_true_dist, get_victree_demo_matrix, cheeger_constant, get_sampler_pmf
-from treesampling.utils.graphs import parlist_to_newick, crasher_matrix, block_matrix
+from treesampling.utils.graphs import parlist_to_newick, crasher_matrix, block_matrix, mat_minor, laplacian, \
+    crasher2_matrix
 
 
 def run_analysis(matrix, sample_size=5000, temp=False):
     norm_matrix = matrix - sp.logsumexp(matrix, axis=0)
     norm_matrix[:, 0] = -np.inf
     logging.info(f"Conductance: {cheeger_constant(norm_matrix, root=0, log_probs=True)[0]}")
+    logging.info(f"Condition number: {np.linalg.cond(mat_minor(laplacian(np.exp(norm_matrix)), 0, 0))}")
     logging.info(f"Normalized matrix:\n{np.array_str(norm_matrix, max_line_width=100, precision=3, suppress_small=True)}")
     true_pmf, mst, edge_freq = analyse_true_dist(matrix)
     n_samples = castaway_dist(matrix, true_pmf, sample_size=sample_size)
@@ -120,7 +122,7 @@ def castaway_dist(matrix, true_pmf, sample_size=5000):
         for i in range(1, len(t)):
             edge_freq[t[i], i] += f
 
-    print("Crasher trick:")
+    print(f"Crasher trick: {sampler.wx._init_crashers}")
     print("Edge frequencies:")
     print(edge_freq)
     print("Edge frequencies sum (must be 1 everywhere except idx=0):")
@@ -136,8 +138,9 @@ def castaway_dist(matrix, true_pmf, sample_size=5000):
 def main():
     # Example matrix from VICTree
     # matrix = get_victree_demo_matrix()
-    matrix = crasher_matrix(7, 2, -30)
-    # matrix = block_matrix(7, 2, log_probs=True, low_weight=-30, root=0)
+    # matrix = crasher_matrix(7, 1, -40)
+    matrix = crasher2_matrix(7, 1, -70)
+    # matrix = block_matrix(7, n_blocks=2, low_weight=-40, log_probs=True, noise_ratio=0.2, root=0)
     run_analysis(matrix, 10000)
 
 if __name__ == "__main__":
