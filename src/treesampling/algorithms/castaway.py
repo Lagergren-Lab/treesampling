@@ -145,11 +145,11 @@ class WxTable:
                 try:
                     wx_table[v, w] = self.op.sub(self.wx_dict[v, w], self.op.div(self.op.mul([self.wx_dict[v, u], self.wx_dict[u, w]]), self.wx_dict[u, u]))
                 except ValueError as ve:
-                    self.logger.error(f"Error updating Wx({v}, {w}) = Wx({v}, {w}) - Wx({v}, {u}) * Wx({u}, {w}) / Wx({u}, {u})")
-                    self.logger.error(f"wx({v}, {w}) = {self.wx_dict[v, w]}")
-                    self.logger.error(f"wx({v}, {u}) = {self.wx_dict[v, u]}")
-                    self.logger.error(f"wx({u}, {w}) = {self.wx_dict[u, w]}")
-                    self.logger.error(f"wx({u}, {u}) = {self.wx_dict[u, u]}")
+                    self.logger.debug(f"Error updating Wx({v}, {w}) = Wx({v}, {w}) - Wx({v}, {u}) * Wx({u}, {w}) / Wx({u}, {u})")
+                    self.logger.debug(f"wx({v}, {w}) = {self.wx_dict[v, w]}")
+                    self.logger.debug(f"wx({v}, {u}) = {self.wx_dict[v, u]}")
+                    self.logger.debug(f"wx({u}, {w}) = {self.wx_dict[u, w]}")
+                    self.logger.debug(f"wx({u}, {u}) = {self.wx_dict[u, u]}")
                     raise ve
                 # log: logsubexp(self.wx[v, w], self.wx[v, u] + self.wx[u, w] - self.wx[u, u])
                 self.logger.debug(f"\t- Updated Wx({v}, {w}) = Wx({v}, {w})({self.wx_dict[v, w]})"
