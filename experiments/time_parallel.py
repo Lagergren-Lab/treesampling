@@ -11,19 +11,19 @@ def main():
     timestamp = time.strftime("%Y%m%d%H%M%S")
     filename = f"{timestamp}_time.csv"
     # Time analysis for crasher vs kulkarni
-    k_values = [7, 10, 15]
-    log_eps_values = [-2, -3, -5, -7, -10, -30, -40, -50, -100]
-    n_seeds = 10
-    n_sample = 500
+    k_values = [50, 100]
+    log_eps_values = [-10, -50]
+    n_seeds = 2
+    n_sample = 2
     with open(filename, 'w') as f:
         f.write('k,seed,log_eps,wilson_time,kulkarni_time,castaway_time,trick,crashers\n')
     bar = tqdm(total=n_seeds * len(k_values) * len(log_eps_values))
     for k in k_values:
+        wilson_disabled = False
         for log_eps in log_eps_values:
             # print(f"Running k={k}, log_eps={log_eps}")
             bar.set_description(f"k={k},log_eps={log_eps}")
             kulkarni_disabled = False
-            wilson_disabled = log_eps < -5
             trick = log_eps > -10
             for seed in range(n_seeds):
                 np.random.seed(seed)
@@ -33,7 +33,12 @@ def main():
                     bar.set_description(f"k={k},log_eps={log_eps},wilson...")
                     wilson_time = time.time()
                     for i in range(n_sample):
+                        partial = time.time()
                         _ = wilson_rst_from_matrix(matrix, log_probs=True)
+                        partial_time = time.time() - partial
+                        if partial_time > 0.5:
+                            wilson_disabled = True
+                            break
                     wilson_time = time.time() - wilson_time
                 else:
                     wilson_time = np.nan

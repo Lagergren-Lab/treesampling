@@ -87,6 +87,27 @@ def get_sampler_pmf(matrix: np.ndarray, sampler: callable, n: int, time_limit=No
         pmf[nwk] = (w, freq, tree)
     return pmf
 
+def get_sampler_pmf_times(matrix: np.ndarray, sampler: callable, n: int, time_limit=None) -> (dict, list):
+    trees = {}
+    times = []
+    for i in range(n):
+        start = time.time()
+        t = tuple(sampler(matrix))
+        exec_time = time.time() - start
+        times.append(exec_time)
+        if time_limit is not None and exec_time > time_limit:
+            logging.debug(f"Time limit exceeded: {exec_time} > {time_limit}")
+            return {}, times
+        if t not in trees:
+            trees[t] = 0
+        trees[t] += 1 / n
+    pmf = {}
+    for tree, freq in sorted(trees.items(), key=lambda x: x[1], reverse=True):
+        nwk = parlist_to_newick(tree)
+        w = tree_weight(tree, matrix, log_probs=True)
+        pmf[nwk] = (w, freq, tree)
+    return pmf, times
+
 
 def cheeger_constant(matrix, root=None, log_probs=False):
     """
