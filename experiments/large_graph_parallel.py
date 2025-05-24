@@ -10,7 +10,6 @@ crasher_issue: 1 if crashers detected in castaway, 0 otherwise
 """
 import logging
 import math
-import sys
 import time
 from datetime import datetime
 import multiprocessing as mp
@@ -64,7 +63,7 @@ def wilson_callback(res: Any) -> None:
 
 def main():
     # parameters
-    low_weights = [-2, -5, -10, -20, -50]
+    low_weights = [-10, -11, -20, -50]
     # low_weights = [-1, -20, -30, -40]
     # low_weights = [-6]
     time_limit: float = np.inf # the limit is 2 times the castaway time for the same (low_weight, n_nodes) pair
@@ -78,7 +77,7 @@ def main():
         "low_weight", "n_nodes", "seed",
         "wilson_time_avg", "kulkarni_time_avg", "castaway_time_avg",
         "wilson_time_std", "kulkarni_time_std", "castaway_time_std",
-        "n_sample",
+        "n_sample", "wilson_hits",
         # compare distribution for assessing accuracy (edge marginals and co-occurrence for complete statistics)
         "num_components",
         # "j_conductance", "cheegers_const", # random-walk-conductance and cheeger constant (too slow for 100 nodes)
@@ -93,10 +92,10 @@ def main():
         f.write(",".join(columns) + "\n")
     # generate matrices with different values of low weight (in log-scale)
     bar = tqdm(total=len(low_weights) * num_seeds)
+    wilson_enabled = True
     for low_weight in low_weights:
         logging.debug(f"Low weight: {low_weight}")
         # multiple graphs iterations
-        wilson_enabled = True
         for seed in range(num_seeds):
             bar.set_description(f"low_weight={low_weight}, seed={seed}")
             logging.debug(f"seed: {seed}")
@@ -133,6 +132,7 @@ def main():
             wilson_times = [None] * n_sample
             wilson_time_avg = np.nan
             wilson_time_std = np.nan
+            wilson_hits = 0
             if wilson_enabled:
                 # Run Wilson's in parallel with timeout based on castaway time
                 with mp.Pool(processes=mp.cpu_count()) as pool:
@@ -145,6 +145,7 @@ def main():
                     pool.terminate()
                 # count None values, if more than 0.5 * n_sample, disable wilson
                 wilson_times = [t for t in wilson_times if t is not None]
+                wilson_hits = len(wilson_times)  # number of successful samples within time limit
                 if len(wilson_times) < 0.5 * n_sample:
                     wilson_enabled = False
                     logging.debug(f"Less than 50% of Wilson's trees sampled in time limit ({len(wilson_times)} < {0.5 * n_sample}), disabling Wilson's sampling")
@@ -203,7 +204,7 @@ def main():
                     low_weight, n_nodes, seed,
                     wilson_time_avg, kulkarni_time_avg, castaway_time_avg,
                     wilson_time_std, kulkarni_time_std, castaway_time_std,
-                    n_sample,
+                    n_sample, wilson_hits,
                     num_components,
                     log_det, cond_number_log10,
                     int(crasher_issue),
